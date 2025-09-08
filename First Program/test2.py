@@ -1,0 +1,2311 @@
+
+import math
+import random
+import sys
+import time
+
+from OpenGL.GL import *
+from OpenGL.GLU import *
+from OpenGL.GLUT import *
+
+# -----------------------
+# Game state (kept & extended)
+# -----------------------
+bark_texture_id = None
+game_start_time = time.time()
+day_mode = 1  # 1=day, 2=evening
+headlights_on = False
+car_x, car_z = 0.0, 0.0
+car_angle = 0.0
+current_speed = 0.0
+max_speed = 10.0  # Moderate pace - reduced from 9.0
+
+acceleration = 0.08  # Very moderate acceleration
+deceleration = 0.5
+brake_deceleration = 1.0
+car_width = 1.5 * 0.9
+car_length = 3.0 * 0.81
+car_height = 1.2 * 0.81
+steering_speed = 45.0  # Moderate steering speed
+wheel_rotation_angle = 0.0
+first_person_view = False
+game_active = True
+score = 0
+time_of_day = 6 * 60  # minutes; start at 6:00
+obstacles = []
+powerups = []
+next_obstacle_time = 0
+game_over_time = 0
+lives = 5
+
+# Jump
+car_jump_height = 0.0
+car_jump_velocity = 0.0
+is_jumping = False
+jump_power = 3.75
+gravity = 1.5
+
+# Enhanced Features
+particles = []
+weather_intensity = 0.0  # 0.0 = clear, 1.0 = heavy rain
+fog_density = 0.0
+wind_strength = 0.0
+lightning_timer = 0.0
+enhanced_lighting = True
+particle_count = 0
+
+# Use the original Particle class from y.py
+class Particle:
+    def __init__(self, x, y, z, vx, vy, vz, life, color):
+        self.x = x; self.y = y; self.z = z
+        self.vx = vx; self.vy = vy; self.vz = vz
+        self.life = life
+        self.color = color
+        self.age = 0.0
+
+# particle helpers (from y.py)
+def add_particles(x, y, z, count=12, spread=0.6, color=(1,0.6,0.2)):
+    for _ in range(count):
+        vx = random.uniform(-spread, spread)
+        vy = random.uniform(0.2, spread*1.2)
+        vz = random.uniform(-spread, spread)
+        life = random.uniform(0.4, 1.0)
+        particles.append(Particle(x, y, z, vx, vy, vz, life, color))
+
+def update_particles(dt):
+    for p in particles[:]:
+        p.age += dt
+        if p.age >= p.life:
+            particles.remove(p)
+            continue
+        p.x += p.vx * dt * 10
+        p.y += p.vy * dt * 10 - 9.8 * (p.age * 0.2)
+        p.z += p.vz * dt * 10
+        p.vy -= 9.8 * dt * 0.5
+
+def draw_particles():
+    glDisable(GL_DEPTH_TEST)
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE)
+    glPointSize(4)
+    glBegin(GL_POINTS)
+    for p in particles:
+        a = max(0.0, 1.0 - (p.age / p.life))
+        glColor4f(p.color[0], p.color[1], p.color[2], 0.9 * a)
+        glVertex3f(p.x, p.y, p.z)
+    glEnd()
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    glEnable(GL_DEPTH_TEST)
+
+def setup_enhanced_lighting():
+    """Setup enhanced lighting system with multiple light sources"""
+    global enhanced_lighting
+
+    if not enhanced_lighting:
+        return
+
+    # Enable lighting
+    glEnable(GL_LIGHTING)
+    glEnable(GL_LIGHT0)
+    glEnable(GL_LIGHT1)
+    glEnable(GL_LIGHT2)
+
+    # Main directional light (sun)
+    if day_mode == 1:  # Day
+        glLightfv(GL_LIGHT0, GL_POSITION, [0.5, 1.0, 0.5, 0.0])  # Directional
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, [1.0, 1.0, 0.9, 1.0])   # Warm white
+        glLightfv(GL_LIGHT0, GL_SPECULAR, [1.0, 1.0, 0.9, 1.0])
+    else:  # Bright Evening
+        glLightfv(GL_LIGHT0, GL_POSITION, [0.4, 0.9, 0.4, 0.0])  # Higher angle for brightness
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, [1.0, 0.8, 0.5, 1.0])   # Brighter warm orange
+        glLightfv(GL_LIGHT0, GL_SPECULAR, [1.0, 0.8, 0.5, 1.0])
+
+    # Car headlights
+    if headlights_on:
+        glEnable(GL_LIGHT1)
+        glLightfv(GL_LIGHT1, GL_POSITION, [car_x, car_height/2 + 0.5, car_z, 1.0])  # Point light
+        glLightfv(GL_LIGHT1, GL_DIFFUSE, [1.0, 1.0, 0.8, 1.0])   # Bright white
+        glLightfv(GL_LIGHT1, GL_SPECULAR, [1.0, 1.0, 0.8, 1.0])
+        glLightf(GL_LIGHT1, GL_CONSTANT_ATTENUATION, 0.5)
+        glLightf(GL_LIGHT1, GL_LINEAR_ATTENUATION, 0.1)
+        glLightf(GL_LIGHT1, GL_QUADRATIC_ATTENUATION, 0.01)
+    else:
+        glDisable(GL_LIGHT1)
+
+    # Ambient lighting
+    if day_mode == 1:  # Day
+        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, [0.3, 0.3, 0.3, 1.0])
+    else:  # Bright Evening
+        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, [0.4, 0.35, 0.25, 1.0])  # Brighter ambient
+
+def draw_weather_effects():
+    """Draw rain, fog, and other weather effects"""
+    global weather_intensity, fog_density, wind_strength, lightning_timer
+
+    # Fog effect
+    if fog_density > 0:
+        glEnable(GL_FOG)
+        glFogi(GL_FOG_MODE, GL_EXP2)
+        glFogfv(GL_FOG_COLOR, [0.5, 0.5, 0.5, 1.0])
+        glFogf(GL_FOG_DENSITY, fog_density)
+        glHint(GL_FOG_HINT, GL_DONT_CARE)
+    else:
+        glDisable(GL_FOG)
+
+    # Rain effect
+    if weather_intensity > 0:
+        glDisable(GL_DEPTH_TEST)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+
+        glColor4f(0.7, 0.8, 1.0, weather_intensity * 0.6)
+        glBegin(GL_LINES)
+
+        # Generate rain drops
+        for i in range(int(weather_intensity * 200)):
+            x = random.uniform(-50, 50)
+            y = random.uniform(20, 30)
+            z = random.uniform(-50, 50)
+
+            glVertex3f(x, y, z)
+            glVertex3f(x + wind_strength * 0.5, y - 2.0, z + wind_strength * 0.3)
+
+        glEnd()
+        glDisable(GL_BLEND)
+        glEnable(GL_DEPTH_TEST)
+
+    # Lightning effect
+    if lightning_timer > 0:
+        lightning_timer -= 0.016  # Assuming 60 FPS
+        if lightning_timer > 0:
+            glDisable(GL_DEPTH_TEST)
+            glColor3f(1.0, 1.0, 1.0)
+            glBegin(GL_LINES)
+            for i in range(5):
+                x = random.uniform(-30, 30)
+                y = random.uniform(15, 25)
+                z = random.uniform(-30, 30)
+                glVertex3f(x, y, z)
+                glVertex3f(x + random.uniform(-2, 2), y - 10, z + random.uniform(-2, 2))
+            glEnd()
+            glEnable(GL_DEPTH_TEST)
+
+# Camera
+camera_angle_horizontal = 0.0
+camera_angle_vertical = 18.0
+camera_distance = 9.0
+car_height_offset = 3.2
+camera_rotation_speed = 3.9
+camera_vertical_speed = 2.0
+min_vertical_angle = 3.0
+max_vertical_angle = 85.0
+camera_damping = 0.3  # Increased damping for more responsive camera
+cam_target = [0.0, 0.0, 0.0]
+camera_shake = 0.0
+
+# Road / scene
+road_width = 12
+scene_start = -50
+scene_end = 5000  # shorter for demo; you can increase
+building_spacing = 40
+tree_spacing = 30
+view_dist = 200  # NEW: Visible range for optimization (ahead/behind car)
+WINDOWS_PER_BUILDING = 4  # REDUCED: From 6 to 4 for fewer windows
+
+# Procedural heights
+building_heights = {}
+tree_heights = {}
+
+# Input state
+keys = {
+    b'w': False, b's': False, b'a': False, b'd': False, b' ': False, b'r': False, b'l': False,
+    b'1': False, b'2': False, b'3': False, b'g': False, b'h': False, b'j': False, b'f': False,
+    b't': False, b'y': False, b'u': False,  # Weather controls
+    b'm': False,  # Mode switch (Day/Evening)
+    'left': False, 'right': False, 'up': False, 'down': False, b'q': False, b'e': False
+}
+
+# Particles
+particles = []
+
+# Bullets
+bullets = []
+bullet_speed = 40.0  # Increased bullet speed
+max_bullets = 50
+last_fire_time = 0.0
+fire_rate = 0.3  # Minimum time between shots (seconds) - increased for slower firing
+
+# Enemies
+enemies = []
+enemy_spawn_timer = 0.0
+enemy_spawn_interval = 3.0  # Spawn enemy every 3 seconds
+max_enemies = 10
+
+# Score system
+score = 0
+
+# HUD / gameplay
+boost_meter = 0.0
+boosting = False
+boost_max = 5.0
+boost_consumption = 0.05
+
+# Misc tuning
+OBSTACLE_Z_AHEAD = 140
+SPAWN_DELAY = 2.0  # INCREASED: Slightly to reduce obstacle density
+# ... (rest of globals unchanged)
+
+# -----------------------
+# Helper classes (unchanged)
+# -----------------------
+class Obstacle:
+    def __init__(self, z_pos):
+        # Only create blue powerups - no red or green obstacles
+        self.kind = 'powerup'
+        self.z = z_pos
+        self.x = random.uniform(-road_width/2 + 1.2, road_width/2 - 1.2)
+        # All obstacles are now blue powerups
+        self.type = 'power'
+        self.color = (0.2, 0.4, 1.0)  # Bright blue color
+        self.pu = 'points'  # All powerups give points now
+        self.scale = 0.5  # Smaller size
+        self.scored = False
+        self.hit = False
+        self.hit_time = 0.0
+
+class Particle:
+    def __init__(self, x, y, z, vx, vy, vz, life, color):
+        self.x = x; self.y = y; self.z = z
+        self.vx = vx; self.vy = vy; self.vz = vz
+        self.life = life
+        self.color = color
+        self.age = 0.0
+
+class Bullet:
+    def __init__(self, x, y, z, vx, vy, vz):
+        self.x = x
+        self.y = y
+        self.z = z
+        self.vx = vx
+        self.vy = vy
+        self.vz = vz
+        self.life = 3.0  # Bullet lifetime in seconds
+        self.age = 0.0
+        self.radius = 0.1
+        self.color = (1.0, 1.0, 0.0)  # Yellow bullet
+
+class Enemy:
+    def __init__(self, x, z):
+        self.x = x
+        self.y = 0.0
+        self.z = z
+        self.speed = 5.0 + random.random() * 2.5  # Moderate enemy speed: 5.0-7.5
+        self.radius = 0.8
+        self.health = 1
+        self.color = (1.0, 0.2, 0.2)  # Red enemy
+        self.pulse = 0.0  # For pulsing effect
+        self.walk_cycle = 0.0  # For walking animation
+
+# -----------------------
+# Utility & drawing helpers (minor changes for state saving)
+# -----------------------
+def init():
+    glClearColor(0.5, 0.8, 1.0, 1.0)
+    glEnable(GL_DEPTH_TEST)
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    glEnable(GL_NORMALIZE)
+    glShadeModel(GL_SMOOTH)
+    glEnable(GL_COLOR_MATERIAL)
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    gluPerspective(60, 800/600, 1.0, 1000.0)
+    glMatrixMode(GL_MODELVIEW)
+    glDepthFunc(GL_LEQUAL)
+    glEnable(GL_DEPTH_CLAMP)
+    glHint(GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST)
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH | GLUT_MULTISAMPLE)
+
+def reset_game():
+    # (unchanged)
+    global car_x, car_z, car_angle, current_speed, camera_angle_horizontal, camera_angle_vertical
+    global headlights_on, first_person_view, game_active, score, obstacles, particles, powerups, lives
+    global game_start_time, next_obstacle_time, car_jump_height, car_jump_velocity, is_jumping, boost_meter, bullets
+    global enemies, enemy_spawn_timer
+    game_start_time = time.time()
+    obstacles = []
+    powerups = []
+    particles = []
+    bullets = []
+    enemies = []
+    enemy_spawn_timer = 0.0
+    next_obstacle_time = time.time() + 2.0
+    car_x, car_z = 0.0, 0.0
+    car_angle = 0.0
+    current_speed = 0.0
+    camera_angle_horizontal = 0.0
+    camera_angle_vertical = 18.0
+    headlights_on = False
+    first_person_view = False
+    game_active = True
+    score = 0
+    lives = 5
+    car_jump_height = 0.0
+    car_jump_velocity = 0.0
+    is_jumping = False
+    boost_meter = boost_max / 2
+
+def spawn_obstacle(z_offset=OBSTACLE_Z_AHEAD):
+    z = car_z + z_offset + random.uniform(-10, 30)
+    obs = Obstacle(z)
+    obstacles.append(obs)
+
+def spawn_powerup(z_offset=OBSTACLE_Z_AHEAD):
+    z = car_z + z_offset + random.uniform(-20, 40)
+    obs = Obstacle(z)
+    obs.kind = 'powerup'
+    obs.type = 'power'
+    obstacles.append(obs)
+
+# particle helpers (unchanged)
+def add_particles(x, y, z, count=12, spread=0.6, color=(1,0.6,0.2)):
+    for _ in range(count):
+        vx = random.uniform(-spread, spread)
+        vy = random.uniform(0.2, spread*1.2)
+        vz = random.uniform(-spread, spread)
+        life = random.uniform(0.4, 1.0)
+        particles.append(Particle(x, y, z, vx, vy, vz, life, color))
+
+def update_particles(dt):
+    for p in particles[:]:
+        p.age += dt
+        if p.age >= p.life:
+            particles.remove(p)
+            continue
+        p.x += p.vx * dt * 10
+        p.y += p.vy * dt * 10 - 9.8 * (p.age * 0.2)
+        p.z += p.vz * dt * 10
+        p.vy -= 9.8 * dt * 0.5
+
+def draw_particles():
+    glDisable(GL_DEPTH_TEST)
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE)
+    glPointSize(4)
+    glBegin(GL_POINTS)
+    for p in particles:
+        a = max(0.0, 1.0 - (p.age / p.life))
+        glColor4f(p.color[0], p.color[1], p.color[2], 0.9 * a)
+        glVertex3f(p.x, p.y, p.z)
+    glEnd()
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    glEnable(GL_DEPTH_TEST)
+
+# Bullet helper functions
+def fire_bullet():
+    global bullets
+    if len(bullets) >= max_bullets:
+        return  # Limit number of bullets
+
+    # Calculate bullet starting position (from tank gun barrel tip at FRONT)
+    # Tank gun barrel tip is at (0, 0.6, 2.6) relative to tank center
+    # We need to transform this to world coordinates
+
+    # Tank center position in world coordinates
+    tank_center_x = car_x
+    tank_center_y = car_height/2 + car_jump_height
+    tank_center_z = car_z
+
+    # Gun barrel tip position relative to tank center (before rotation)
+    # EXACT MATCH: These coordinates must match the gun muzzle brake position exactly
+    gun_local_x = 0.0
+    gun_local_y = 0.6  # Height above tank center - matches gun barrel
+    gun_local_z = 2.6  # EXACT position of gun muzzle brake - matches drawing function
+
+    # Apply tank rotation to get world position
+    # Rotate the local gun position by the tank's angle
+    cos_angle = math.cos(math.radians(car_angle))
+    sin_angle = math.sin(math.radians(car_angle))
+
+    # Transform gun barrel tip position to world coordinates
+    # This ensures bullets ALWAYS come from the exact gun barrel tip
+    # PINPOINT ACCURATE: Coordinates match exactly with gun muzzle brake position (0, 0.6, 2.6)
+    # The bullet will fire from the exact center of the muzzle brake cube
+    gun_x = tank_center_x + gun_local_x * cos_angle - gun_local_z * sin_angle
+    gun_y = tank_center_y + gun_local_y
+    gun_z = tank_center_z + gun_local_x * sin_angle + gun_local_z * cos_angle
+
+    # Calculate bullet direction (forward from car) - match car movement exactly
+    bullet_vx = bullet_speed * sin_angle
+    bullet_vy = 0.0  # No vertical velocity initially
+    bullet_vz = bullet_speed * cos_angle
+
+    # Create new bullet
+    bullet = Bullet(gun_x, gun_y, gun_z, bullet_vx, bullet_vy, bullet_vz)
+    bullets.append(bullet)
+
+def update_bullets(dt):
+    global bullets
+    for bullet in bullets[:]:
+        bullet.age += dt
+        if bullet.age >= bullet.life:
+            bullets.remove(bullet)
+            continue
+
+        # Update bullet position
+        bullet.x += bullet.vx * dt
+        bullet.y += bullet.vy * dt
+        bullet.z += bullet.vz * dt
+
+        # Bullets travel straight - no gravity applied
+
+        # Remove bullets that are too far away
+        if (abs(bullet.x) > 200 or bullet.y < -10 or
+            abs(bullet.z - car_z) > 300):
+            bullets.remove(bullet)
+
+def draw_bullets():
+    glEnable(GL_DEPTH_TEST)
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+
+    for bullet in bullets:
+        glPushMatrix()
+        glTranslatef(bullet.x, bullet.y, bullet.z)
+        glColor3f(*bullet.color)
+        glutSolidSphere(bullet.radius, 8, 8)
+        glPopMatrix()
+
+    glDisable(GL_BLEND)
+
+def spawn_enemy():
+    global enemies, enemy_spawn_timer
+    if len(enemies) >= max_enemies:
+        return
+
+    # Spawn enemy ahead of the car in the road
+    spawn_distance = 50.0 + random.random() * 30.0  # 50-80 units ahead
+    spawn_x = (random.random() - 0.5) * 8.0  # Random position across road width
+    spawn_z = car_z + spawn_distance
+
+    enemy = Enemy(spawn_x, spawn_z)
+    enemies.append(enemy)
+
+def update_enemies(dt):
+    global enemies, score, lives, game_active, game_over_time
+    for enemy in enemies[:]:
+        # Move enemy towards car
+        enemy.z -= enemy.speed * dt
+        enemy.pulse += dt * 5.0  # Pulsing effect
+        enemy.walk_cycle += dt * 8.0  # Walking animation cycle
+
+        # Remove enemies that are behind the car
+        if enemy.z < car_z - 20:
+            enemies.remove(enemy)
+            continue
+
+        # Check collision with car
+        distance_to_car = math.sqrt((enemy.x - car_x)**2 + (enemy.z - car_z)**2)
+        if distance_to_car < (enemy.radius + 1.2):  # Tank radius ~1.2
+            # Check if car is jumping high enough to clear the enemy
+            car_height_above_ground = car_jump_height
+            enemy_height = 1.6  # Approximate height of humanoid enemy (head to feet)
+
+            if is_jumping and car_height_above_ground > enemy_height * 0.7:  # Need to clear 70% of enemy height
+                # Successfully jumped over enemy - no penalty, enemy continues
+                continue
+            else:
+                # Car collision with enemy (not jumping or not high enough)
+                lives -= 1
+                enemies.remove(enemy)
+                # Check for game over
+                if lives <= 0:
+                    game_active = False
+                    game_over_time = time.time()
+                continue
+
+def draw_enemies():
+    glEnable(GL_DEPTH_TEST)
+    for enemy in enemies:
+        glPushMatrix()
+        glTranslatef(enemy.x, enemy.y, enemy.z)
+
+        # Pulsing effect for intimidation
+        pulse_scale = 1.0 + 0.1 * math.sin(enemy.pulse)
+        glScalef(pulse_scale, pulse_scale, pulse_scale)
+
+        # Enemy color with pulsing intensity
+        intensity = 0.8 + 0.2 * math.sin(enemy.pulse)
+        glColor3f(enemy.color[0] * intensity, enemy.color[1] * intensity, enemy.color[2] * intensity)
+
+        # Walking animation - slight bobbing
+        walk_bob = 0.1 * math.sin(enemy.walk_cycle)
+        glTranslatef(0, walk_bob, 0)
+
+        # Rotate enemy to face forward (towards the car)
+        glRotatef(180, 0, 1, 0)  # Rotate 180 degrees around Y-axis
+
+        # Draw humanoid enemy
+
+        # HEAD (red sphere)
+        glPushMatrix()
+        glTranslatef(0, 1.2, 0)
+        glutSolidSphere(0.3, 8, 8)
+
+        # EYES (white spheres with black pupils)
+        glColor3f(1.0, 1.0, 1.0)  # White eyes
+        glPushMatrix()
+        glTranslatef(-0.1, 0.1, 0.25)
+        glutSolidSphere(0.08, 6, 6)
+        glPopMatrix()
+        glPushMatrix()
+        glTranslatef(0.1, 0.1, 0.25)
+        glutSolidSphere(0.08, 6, 6)
+        glPopMatrix()
+
+        # BLACK PUPILS
+        glColor3f(0.0, 0.0, 0.0)  # Black pupils
+        glPushMatrix()
+        glTranslatef(-0.1, 0.1, 0.3)
+        glutSolidSphere(0.04, 6, 6)
+        glPopMatrix()
+        glPushMatrix()
+        glTranslatef(0.1, 0.1, 0.3)
+        glutSolidSphere(0.04, 6, 6)
+        glPopMatrix()
+
+        glPopMatrix()
+
+        # BODY (red cube) - wider to connect with arms
+        glColor3f(enemy.color[0] * intensity, enemy.color[1] * intensity, enemy.color[2] * intensity)
+        glPushMatrix()
+        glTranslatef(0, 0.6, 0)
+        glScalef(0.8, 0.8, 0.4)  # Increased width from 0.6 to 0.8
+        glutSolidCube(1)
+        glPopMatrix()
+
+        # ARMS (red cylinders) - positioned to connect with body
+        arm_swing = 0.3 * math.sin(enemy.walk_cycle)
+        glPushMatrix()
+        glTranslatef(-0.35, 0.7, 0)  # Positioned inside body edge for connection
+        glRotatef(arm_swing * 30, 1, 0, 0)  # Arm swinging
+        glRotatef(90, 0, 1, 0)
+        glutSolidCylinder(0.1, 0.6, 6, 6)
+        glPopMatrix()
+
+        glPushMatrix()
+        glTranslatef(0.35, 0.7, 0)  # Positioned inside body edge for connection
+        glRotatef(-arm_swing * 30, 1, 0, 0)  # Opposite arm swinging
+        glRotatef(90, 0, 1, 0)
+        glutSolidCylinder(0.1, 0.6, 6, 6)
+        glPopMatrix()
+
+        # HANDS (red spheres) - updated positions to match new arm positions
+        glPushMatrix()
+        glTranslatef(-0.35 - 0.6 * math.cos(arm_swing * 0.5), 0.7, 0.6 * math.sin(arm_swing * 0.5))
+        glutSolidSphere(0.12, 6, 6)
+        glPopMatrix()
+        glPushMatrix()
+        glTranslatef(0.35 + 0.6 * math.cos(arm_swing * 0.5), 0.7, 0.6 * math.sin(arm_swing * 0.5))
+        glutSolidSphere(0.12, 6, 6)
+        glPopMatrix()
+
+        # LEGS (red cylinders with walking animation)
+        leg_swing = 0.4 * math.sin(enemy.walk_cycle)
+        glPushMatrix()
+        glTranslatef(-0.2, 0.2, 0)
+        glRotatef(leg_swing * 20, 1, 0, 0)  # Leg swinging
+        glRotatef(90, 1, 0, 0)
+        glutSolidCylinder(0.12, 0.8, 6, 6)
+        glPopMatrix()
+
+        glPushMatrix()
+        glTranslatef(0.2, 0.2, 0)
+        glRotatef(-leg_swing * 20, 1, 0, 0)  # Opposite leg swinging
+        glRotatef(90, 1, 0, 0)
+        glutSolidCylinder(0.12, 0.8, 6, 6)
+        glPopMatrix()
+
+        # FEET (dark red spheres)
+        glColor3f(0.6, 0.1, 0.1)  # Darker red for feet
+        glPushMatrix()
+        glTranslatef(-0.2, -0.2, 0.8 * math.sin(leg_swing * 0.3))
+        glutSolidSphere(0.15, 6, 6)
+        glPopMatrix()
+        glPushMatrix()
+        glTranslatef(0.2, -0.2, 0.8 * math.sin(-leg_swing * 0.3))
+        glutSolidSphere(0.15, 6, 6)
+        glPopMatrix()
+
+        glPopMatrix()
+
+def check_bullet_enemy_collisions():
+    global bullets, enemies, score
+    for bullet in bullets[:]:
+        for enemy in enemies[:]:
+            # Calculate distance between bullet and enemy
+            distance = math.sqrt((bullet.x - enemy.x)**2 + (bullet.y - enemy.y)**2 + (bullet.z - enemy.z)**2)
+
+            if distance < (bullet.radius + enemy.radius + 0.3):  # More forgiving collision detection
+                # Collision detected
+                bullets.remove(bullet)
+                enemies.remove(enemy)
+                score += 10  # +10 points for killing enemy
+                break
+
+# -----------------------
+# Drawing: sky, ground, scenery, car, obstacles, HUD (optimized)
+# -----------------------
+def draw_sky():
+    # (unchanged)
+    t = (time_of_day % (24*60)) / (24*60)
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+    glDisable(GL_DEPTH_TEST)
+    glBegin(GL_QUADS)
+    if day_mode == 1:
+        top = (0.2, 0.6, 1.0)
+        bottom = (0.7, 0.9, 1.0)
+    else:  # Evening
+        top = (0.12, 0.1, 0.25)
+        bottom = (0.9, 0.5, 0.3)
+    glColor3f(*top); glVertex3f(-200, 200, -200)
+    glColor3f(*top); glVertex3f(200, 200, -200)
+    glColor3f(*bottom); glVertex3f(200, -10, -200)
+    glColor3f(*bottom); glVertex3f(-200, -10, -200)
+    glEnd()
+    glEnable(GL_DEPTH_TEST)
+    glPopMatrix()
+
+    # Sun and moon removed as requested
+
+# Sun and moon removed as requested
+
+def draw_ground():
+    # big ground (unchanged)
+    if day_mode == 1:
+        ground_col = (0.2, 0.6, 0.25)
+    else:  # Bright Evening
+        ground_col = (0.25, 0.5, 0.2)  # Brighter green for evening
+
+    glColor3f(*ground_col)
+    glBegin(GL_QUADS)
+    glVertex3f(-200, 0, scene_start)
+    glVertex3f(-200, 0, scene_end)
+    glVertex3f(200, 0, scene_end)
+    glVertex3f(200, 0, scene_start)
+    glEnd()
+
+    # road base (unchanged)
+    road_y = 0.02
+    if day_mode == 1:
+        road_col = (0.18, 0.18, 0.18)
+    else:  # Bright Evening
+        road_col = (0.22, 0.22, 0.22)  # Brighter road for evening
+    glColor3f(*road_col)
+    glBegin(GL_QUADS)
+    glVertex3f(-road_width / 2, road_y, scene_start)
+    glVertex3f(-road_width / 2, road_y, scene_end)
+    glVertex3f(road_width / 2, road_y, scene_end)
+    glVertex3f(road_width / 2, road_y, scene_start)
+    glEnd()
+
+    # reflective highlight (unchanged)
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    highlight = 0.06 if day_mode==1 else 0.08  # Brighter highlight for evening
+    glColor4f(1.0, 1.0, 1.0, highlight)
+    glBegin(GL_QUADS)
+    glVertex3f(-road_width/2 + 0.5, road_y+0.001, scene_start)
+    glVertex3f(-road_width/2 + 0.5, road_y+0.001, scene_end)
+    glVertex3f(road_width/2 - 0.5, road_y+0.001, scene_end)
+    glVertex3f(road_width/2 - 0.5, road_y+0.001, scene_start)
+    glEnd()
+    glDisable(GL_BLEND)  # FIXED: Disable here to avoid leak
+
+    # lane marks (OPTIMIZED: Limit to visible range)
+    lane_width = 0.25
+    lane_length = 1.8
+    gap_length = 4.0
+    cycle_length = lane_length + gap_length
+    mark_col = (1,1,1) if day_mode==1 else (0.9,0.9,0.9)  # Brighter lane markings for evening
+
+    # Compute visible range
+    z_start = max(scene_start, car_z - view_dist)
+    z_end = min(scene_end, car_z + view_dist / 2)  # Less ahead since camera looks forward
+
+    # Align start z to dash pattern
+    start_offset = z_start % cycle_length
+    z = z_start - start_offset + (gap_length if start_offset < lane_length else 0)
+
+    glColor3f(*mark_col)
+    while z < z_end:
+        if z + lane_length > z_start:  # Only draw if intersects visible range
+            glBegin(GL_QUADS)
+            glVertex3f(-lane_width/2, road_y + 0.02, max(z, z_start))
+            glVertex3f(-lane_width/2, road_y + 0.02, min(z + lane_length, z_end))
+            glVertex3f(lane_width/2, road_y + 0.02, min(z + lane_length, z_end))
+            glVertex3f(lane_width/2, road_y + 0.02, max(z, z_start))
+            glEnd()
+        z += cycle_length
+
+# Persistent states for buildings (unchanged)
+building_states = {}
+def draw_building(x, z, scale_x, scale_y, scale_z, base_color):
+    """Enhanced building drawing function with improved architecture and details"""
+    global building_states
+
+    key = (x, z)  # unique ID for each building
+
+    if key not in building_states:
+        # ----------------------------
+        # INITIALIZE BUILDING STATE
+        # ----------------------------
+        state = {}
+
+        # Enhanced facade colors with more variety
+        facade_colors = [
+            (0.85, 0.75, 0.65),  # warm beige
+            (0.7, 0.8, 0.9),     # light blue
+            (0.8, 0.7, 0.6),     # tan
+            (0.75, 0.85, 0.8),   # mint
+            (0.9, 0.8, 0.7),     # cream
+            (0.65, 0.7, 0.85),   # lavender
+            (0.8, 0.6, 0.5),     # terracotta
+            (0.7, 0.9, 0.8),     # sage green
+            (0.85, 0.7, 0.8),    # rose
+            (0.6, 0.8, 0.9)      # sky blue
+]
+
+        chosen = random.choice(facade_colors)
+        state["color"] = (
+            chosen[0] * random.uniform(0.85, 1.15),
+            chosen[1] * random.uniform(0.85, 1.15),
+            chosen[2] * random.uniform(0.85, 1.15)
+        )
+
+        # Simplified window configuration - fixed structure
+        windows = []
+        num_rows = 4  # Fixed number of rows for simplicity
+        num_cols = 5  # Fixed number of columns
+        for r in range(num_rows):
+            row_states = []
+            for c in range(num_cols):
+                # More realistic window lighting pattern
+                lit_prob = 0.4 if r < num_rows // 2 else 0.6  # Lower floors more likely to be lit
+                row_states.append(random.random() > lit_prob)
+            windows.append(row_states)
+        state["windows"] = windows
+
+        # Building type for architectural variety
+        state["building_type"] = random.choice(["modern", "classic", "office", "residential"])
+
+        # Roof style
+        state["roof_style"] = random.choice(["flat", "sloped", "domed"])
+
+        building_states[key] = state
+
+    # Retrieve persistent state
+    state = building_states[key]
+    col = state["color"]
+    windows = state["windows"]
+    building_type = state["building_type"]
+    roof_style = state["roof_style"]
+
+    # Debug: ensure col is a tuple
+    if not isinstance(col, (tuple, list)) or len(col) != 3:
+        col = (0.7, 0.7, 0.7)  # Default gray color
+
+    glPushMatrix()
+    glTranslatef(x, scale_y / 2 + 0.1, z + 0.1)
+
+    # Save/restore all attributes
+    glPushAttrib(GL_ALL_ATTRIB_BITS)
+    glEnable(GL_DEPTH_TEST)
+    glDepthFunc(GL_LESS)
+    glEnable(GL_CULL_FACE)
+
+    # ----------------------------
+    # APPLY TIME OF DAY COLOR ADJUSTMENTS
+    # ----------------------------
+    if day_mode == 2:  # bright evening
+        col = tuple(c * 0.9 for c in col)  # Less darkening for brighter evening
+
+    # ----------------------------
+    # PROPER MULTI-STORY BUILDING
+    # ----------------------------
+    # Calculate number of floors based on building height
+    num_floors = max(3, int(scale_y / 3.0))  # Each floor is about 3 units high
+    floor_height = 2.8  # Fixed floor height for consistency
+    total_building_height = num_floors * floor_height
+
+    # Draw each floor as a distinct building section
+    for floor in range(num_floors):
+        floor_y = -total_building_height/2 + (floor * floor_height) + floor_height/2
+
+        # Each floor has slightly different color to distinguish them
+        floor_col = (
+            col[0] * (0.85 + floor * 0.05),
+            col[1] * (0.85 + floor * 0.05),
+            col[2] * (0.85 + floor * 0.05)
+        )
+
+        # Draw the floor as a complete building section
+        glColor3f(*floor_col)
+        glPushMatrix()
+        glTranslatef(0, floor_y, 0)
+        glScalef(scale_x, floor_height, scale_z)
+        glutSolidCube(1)
+        glPopMatrix()
+
+        # Add floor separator (thicker, more visible)
+        if floor < num_floors - 1:  # Don't draw separator after top floor
+            separator_y = -total_building_height/2 + ((floor + 1) * floor_height)
+            glColor3f(col[0] * 0.4, col[1] * 0.4, col[2] * 0.4)  # Darker separator
+            glBegin(GL_QUADS)
+            # Thicker separator line
+            glVertex3f(-scale_x/2, separator_y - 0.1, 0.501)
+            glVertex3f(scale_x/2, separator_y - 0.1, 0.501)
+            glVertex3f(scale_x/2, separator_y + 0.1, 0.501)
+            glVertex3f(-scale_x/2, separator_y + 0.1, 0.501)
+            glEnd()
+
+            # Add side separators for more definition
+            glColor3f(col[0] * 0.3, col[1] * 0.3, col[2] * 0.3)
+            # Left side separator
+            glBegin(GL_QUADS)
+            glVertex3f(-scale_x/2 - 0.05, separator_y - 0.1, 0.501)
+            glVertex3f(-scale_x/2 + 0.05, separator_y - 0.1, 0.501)
+            glVertex3f(-scale_x/2 + 0.05, separator_y + 0.1, 0.501)
+            glVertex3f(-scale_x/2 - 0.05, separator_y + 0.1, 0.501)
+            glEnd()
+            # Right side separator
+            glBegin(GL_QUADS)
+            glVertex3f(scale_x/2 - 0.05, separator_y - 0.1, 0.501)
+            glVertex3f(scale_x/2 + 0.05, separator_y - 0.1, 0.501)
+            glVertex3f(scale_x/2 + 0.05, separator_y + 0.1, 0.501)
+            glVertex3f(scale_x/2 - 0.05, separator_y + 0.1, 0.501)
+            glEnd()
+
+    # ----------------------------
+    # ARCHITECTURAL DETAILS
+    # ----------------------------
+
+    # Building facade lines (horizontal)
+    glColor3f(col[0] * 0.7, col[1] * 0.7, col[2] * 0.7)
+    glBegin(GL_LINES)
+    for i in range(-int(scale_y/2), int(scale_y/2) + 1):
+        y_pos = i * 0.2
+        if abs(y_pos) < scale_y/2 - 0.1:  # Don't draw lines at edges
+            glVertex3f(-0.5, y_pos, 0.501)
+            glVertex3f(0.5, y_pos, 0.501)
+    glEnd()
+
+    # Vertical facade lines
+    glBegin(GL_LINES)
+    for i in range(-3, 4):
+        x_pos = i * 0.15
+        if abs(x_pos) < 0.45:
+            glVertex3f(x_pos, -scale_y/2 + 0.1, 0.501)
+            glVertex3f(x_pos, scale_y/2 - 0.1, 0.501)
+    glEnd()
+
+    # ----------------------------
+    # WINDOWS ON EACH FLOOR
+    # ----------------------------
+    # Disable depth testing temporarily to ensure windows are always visible
+    glDisable(GL_DEPTH_TEST)
+    glDisable(GL_CULL_FACE)
+
+    # Different window colors for variety
+    window_colors = [
+        (0.5, 0.8, 1.0),   # Sky blue
+        (1.0, 1.0, 0.0),   # Yellow
+        (0.8, 0.9, 1.0),   # Light blue
+        (1.0, 0.9, 0.5),   # Light yellow
+        (0.7, 0.9, 1.0),   # Pale blue
+        (1.0, 0.8, 0.3),   # Golden yellow
+        (0.6, 0.8, 1.0),   # Soft blue
+        (1.0, 0.7, 0.0),   # Orange yellow
+        (0.8, 0.8, 1.0),   # Lavender blue
+    ]
+
+    # Add windows to each floor
+    for floor in range(num_floors):
+        floor_y = -total_building_height/2 + (floor * floor_height) + floor_height/2
+
+        # 3 windows per floor
+        window_x_positions = [-0.2, 0.0, 0.2]
+
+        for window_idx, x_pos in enumerate(window_x_positions):
+            y_pos = floor_y
+
+            # Window frame - dark gray
+            glColor3f(0.3, 0.3, 0.3)  # Dark gray frame
+            glBegin(GL_QUADS)
+            glVertex3f(x_pos - 0.08, y_pos - 0.08, 0.51)
+            glVertex3f(x_pos + 0.08, y_pos - 0.08, 0.51)
+            glVertex3f(x_pos + 0.08, y_pos + 0.08, 0.51)
+            glVertex3f(x_pos - 0.08, y_pos + 0.08, 0.51)
+            glEnd()
+
+            # Window glass - colorful based on time of day
+            if day_mode == 2:  # bright evening
+                # At bright evening, use warm colors
+                glColor3f(1.0, 0.8, 0.4)  # Brighter warm orange
+            else:  # day
+                # During day, use different colors for each floor
+                color_idx = (floor * 3 + window_idx) % len(window_colors)
+                glColor3f(*window_colors[color_idx])
+
+            glBegin(GL_QUADS)
+            glVertex3f(x_pos - 0.06, y_pos - 0.06, 0.52)
+            glVertex3f(x_pos + 0.06, y_pos - 0.06, 0.52)
+            glVertex3f(x_pos + 0.06, y_pos + 0.06, 0.52)
+            glVertex3f(x_pos - 0.06, y_pos + 0.06, 0.52)
+            glEnd()
+
+    # Re-enable depth testing and culling
+    glEnable(GL_DEPTH_TEST)
+    glEnable(GL_CULL_FACE)
+
+
+    # ----------------------------
+    # ENHANCED ROOF
+    # ----------------------------
+    if roof_style == "flat":
+        # Flat roof with ledge
+        glColor3f(col[0] * 0.6, col[1] * 0.6, col[2] * 0.6)
+        glBegin(GL_QUADS)
+        glVertex3f(-0.5, scale_y / 2, 0.51)
+        glVertex3f(0.5, scale_y / 2, 0.51)
+        glVertex3f(0.5, scale_y / 2 + 0.08, 0.51)
+        glVertex3f(-0.5, scale_y / 2 + 0.08, 0.51)
+        glEnd()
+
+        # Roof ledge
+        glColor3f(col[0] * 0.4, col[1] * 0.4, col[2] * 0.4)
+        glBegin(GL_QUADS)
+        glVertex3f(-0.52, scale_y / 2 + 0.08, 0.49)
+        glVertex3f(0.52, scale_y / 2 + 0.08, 0.49)
+        glVertex3f(0.52, scale_y / 2 + 0.08, 0.53)
+        glVertex3f(-0.52, scale_y / 2 + 0.08, 0.53)
+        glEnd()
+
+    elif roof_style == "sloped":
+        # Sloped roof
+        glColor3f(col[0] * 0.5, col[1] * 0.5, col[2] * 0.5)
+        glBegin(GL_TRIANGLES)
+        glVertex3f(0, scale_y / 2 + 0.3, 0.51)
+        glVertex3f(-0.5, scale_y / 2, 0.51)
+        glVertex3f(0.5, scale_y / 2, 0.51)
+        glEnd()
+
+    elif roof_style == "domed":
+        # Domed roof
+        glColor3f(col[0] * 0.6, col[1] * 0.6, col[2] * 0.6)
+        glPushMatrix()
+        glTranslatef(0, scale_y / 2 + 0.2, 0.51)
+        glutSolidSphere(0.3, 12, 8)
+        glPopMatrix()
+
+    # ----------------------------
+    # BUILDING BASE
+    # ----------------------------
+    glColor3f(col[0] * 0.3, col[1] * 0.3, col[2] * 0.3)
+    glBegin(GL_QUADS)
+    glVertex3f(-0.5, -0.5, 0.501)
+    glVertex3f(0.5, -0.5, 0.501)
+    glVertex3f(0.5, -0.48, 0.501)
+    glVertex3f(-0.5, -0.48, 0.501)
+    glEnd()
+
+    # ----------------------------
+    # SIDE FACES - SIMPLIFIED (removed for now to focus on front face)
+    # ----------------------------
+
+    glPopAttrib()
+    glDisable(GL_CULL_FACE)
+    glPopMatrix()
+
+
+# def draw_tree(x, z, trunk_height, leaf_radius):
+#     glPushMatrix()
+#     glTranslatef(x, 0, z)  # Position at base of tree
+
+#     # Save/restore attributes (NEW)
+#     glPushAttrib(GL_ALL_ATTRIB_BITS)
+#     glEnable(GL_POLYGON_OFFSET_FILL)
+#     glPolygonOffset(1.0, 1.0)
+
+#     # Random seed for consistent variation
+#     random.seed(hash((x, z)))
+
+#     # Slight height and size variation
+#     height_variation = 1.0 + (random.random() - 0.5) * 0.1
+#     trunk_height *= height_variation
+#     leaf_radius *= height_variation * 1.2
+
+#     # ------------------------------
+#     # Trunk with roots (SIMPLIFIED: Fewer root extensions)
+#     # ------------------------------
+#     if day_mode == 1:
+#         glColor3f(0.55, 0.35, 0.15)  # Light brown (day)
+#     else:
+#         glColor3f(0.45, 0.25, 0.10)  # Dark brown (night)
+
+#     # Main trunk (simplified)
+#     glPushMatrix()
+#     glTranslatef(0, trunk_height * 0.2, 0)
+#     glScalef(0.6, trunk_height * 0.6, 0.6)
+#     glutSolidCube(1)
+#     glPopMatrix()
+
+#     # Root extensions (REDUCED: 2 instead of 4)
+#     for i in range(2):
+#         glPushMatrix()
+#         angle = i * 180 * 3.14159 / 180.0
+#         glTranslatef(0.3 * math.cos(angle), 0, 0.3 * math.sin(angle))
+#         glRotatef(i * 180, 0, 1, 0)
+#         glScalef(0.4, 0.2, 0.4)
+#         glutSolidCube(1)
+#         glPopMatrix()
+
+#     # ------------------------------
+#     # Foliage with clustered leaves (REDUCED clusters)
+#     # ------------------------------
+#     glTranslatef(0, trunk_height * 0.6, 0)
+
+#     if day_mode == 1:
+#         base_color = [0.2, 0.6, 0.1]  # Vibrant green (day)
+#         leaf_colors = [
+#             [0.25, 0.65, 0.15],
+#             [0.2, 0.6, 0.1],
+#             [0.3, 0.7, 0.2]
+#         ]
+#     else:
+#         base_color = [0.15, 0.4, 0.05]  # Darker green (night)
+#         leaf_colors = [
+#             [0.18, 0.45, 0.08],
+#             [0.15, 0.4, 0.05],
+#             [0.2, 0.5, 0.1]
+#         ]
+
+#     # Main canopy base
+#     glColor3f(*base_color)
+#     glutSolidSphere(leaf_radius * 0.8, 16, 16)
+
+#     # Clustered leaf-like spheres (REDUCED: 6 instead of 12)
+#     num_clusters = 6
+#     for i in range(num_clusters):
+#         glPushMatrix()
+#         angle = i * 2 * 3.14159 / num_clusters
+#         radius_offset = leaf_radius * 0.7 + random.random() * leaf_radius * 0.3
+#         height_offset = random.random() * leaf_radius * 0.4
+#         glTranslatef(radius_offset * math.cos(angle), height_offset, radius_offset * math.sin(angle))
+#         glColor3f(*leaf_colors[random.randint(0, 2)])
+#         glutSolidSphere(leaf_radius * 0.3, 12, 12)
+#         glPopMatrix()
+
+#     glPopAttrib()
+#     glPopMatrix()
+
+
+
+
+
+def draw_tree(x, z, trunk_height, leaf_radius):
+    glPushMatrix()
+    glTranslatef(x, 0, z)  # Position at base of tree
+
+    # Save/restore attributes
+    glPushAttrib(GL_ALL_ATTRIB_BITS)
+    glEnable(GL_POLYGON_OFFSET_FILL)
+    glPolygonOffset(1.0, 1.0)
+    glEnable(GL_LIGHTING)  # Enable lighting for better shading
+    glEnable(GL_LIGHT0)    # Use light for realism
+
+    # Random seed for consistent variation
+    random.seed(hash((x, z)))
+
+    # Slight height and size variation
+    height_variation = 1.0 + (random.random() - 0.5) * 0.15
+    trunk_height *= height_variation
+    leaf_radius *= height_variation * 1.3
+
+    # ------------------------------
+    # Trunk with bark details
+    # ------------------------------
+    if day_mode == 1:
+        trunk_color = [0.55, 0.35, 0.15]  # Light brown (day)
+        bark_accent = [0.45, 0.25, 0.1]   # Darker brown for texture
+    else:
+        trunk_color = [0.5, 0.3, 0.15]  # Brighter brown for evening
+        bark_accent = [0.4, 0.2, 0.1]  # Brighter for evening
+
+    # Tapered trunk (cone for natural shape)
+    glPushMatrix()
+    glTranslatef(0, trunk_height * 0.5, 0)
+    glRotatef(-90, 1, 0, 0)  # Align cone vertically
+    glColor3f(*trunk_color)
+    glutSolidCone(0.4, trunk_height, 12, 4)  # Base radius 0.4, height=trunk_height
+    glPopMatrix()
+
+    # Bark texture (vertical lines)
+    glColor3f(*bark_accent)
+    glBegin(GL_LINES)
+    for i in range(8):
+        angle = i * 45 * 3.14159 / 180.0
+        x_offset = 0.38 * math.cos(angle)
+        z_offset = 0.38 * math.sin(angle)
+        glVertex3f(x_offset, 0.0, z_offset)
+        glVertex3f(x_offset * 0.8, trunk_height * 0.8, z_offset * 0.8)
+    glEnd()
+
+    # ------------------------------
+    # Root system (organic extensions)
+    # ------------------------------
+    for i in range(4):  # Four roots for fuller base
+        glPushMatrix()
+        angle = i * 90 * 3.14159 / 180.0
+        glTranslatef(0.5 * math.cos(angle), 0.1, 0.5 * math.sin(angle))
+        glRotatef(45, math.sin(angle), 0, -math.cos(angle))  # Slight curve outward
+        glScalef(0.3, 0.4, 0.3)
+        glColor3f(*bark_accent)
+        glutSolidCone(0.3, 0.8, 8, 2)  # Smaller, shorter cones for roots
+        glPopMatrix()
+
+    # ------------------------------
+    # Foliage with layered canopy
+    # ------------------------------
+    glTranslatef(0, trunk_height * 0.7, 0)  # Move up to canopy base
+
+    if day_mode == 1:
+        base_color = [0.2, 0.7, 0.15]  # Vibrant green (day)
+        leaf_colors = [
+            [0.25, 0.75, 0.2],  # Bright green
+            [0.2, 0.65, 0.15],  # Mid green
+            [0.3, 0.8, 0.25]    # Light green
+        ]
+    else:
+        base_color = [0.25, 0.6, 0.15]  # Brighter green for evening
+        leaf_colors = [
+            [0.3, 0.65, 0.2],  # Brighter green
+            [0.15, 0.45, 0.1],  # Mid dark
+            [0.2, 0.55, 0.15]   # Slightly lighter
+        ]
+
+    # Enable blending for subtle leaf transparency
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+
+    # Main canopy (larger base sphere)
+    glColor4f(base_color[0], base_color[1], base_color[2], 0.95)
+    glutSolidSphere(leaf_radius * 0.9, 16, 16)
+
+    # Layered leaf clusters (8 clusters across 2 layers)
+    num_clusters = 8
+    for layer in range(2):  # Two layers for depth
+        layer_height = layer * leaf_radius * 0.5
+        layer_scale = 0.7 - layer * 0.2  # Smaller clusters higher up
+        for i in range(num_clusters):
+            glPushMatrix()
+            angle = (i + layer * 0.5) * 2 * 3.14159 / num_clusters  # Stagger angles
+            radius_offset = leaf_radius * (0.6 + random.random() * 0.4)
+            height_offset = layer_height + random.random() * leaf_radius * 0.3
+            glTranslatef(radius_offset * math.cos(angle), height_offset, radius_offset * math.sin(angle))
+            glColor4f(leaf_colors[random.randint(0, 2)][0], leaf_colors[random.randint(0, 2)][1],
+                      leaf_colors[random.randint(0, 2)][2], 0.85)
+            glutSolidSphere(leaf_radius * layer_scale * 0.35, 10, 10)
+            glPopMatrix()
+
+    # ------------------------------
+    # Ground shadow (simple circle)
+    # ------------------------------
+    glDisable(GL_LIGHTING)
+    glColor4f(0.1, 0.1, 0.1, 0.3)  # Semi-transparent dark shadow
+    glPushMatrix()
+    glTranslatef(0, 0.01, 0)  # Slightly above ground to avoid z-fighting
+    glBegin(GL_TRIANGLE_FAN)
+    glVertex3f(0, 0, 0)
+    for i in range(13):
+        angle = i * 2 * 3.14159 / 12
+        glVertex3f(leaf_radius * 0.9 * math.cos(angle), 0, leaf_radius * 0.9 * math.sin(angle))
+    glEnd()
+    glPopMatrix()
+
+    glDisable(GL_BLEND)
+    glPopAttrib()
+    glPopMatrix()
+
+def draw_grass(x, z, grass_height=0.3, grass_width=0.1):
+    """Draw pointed grass at specified position"""
+    glPushMatrix()
+    glTranslatef(x, 0, z)
+
+    # Grass color based on time of day
+    if day_mode == 1:
+        grass_col = (0.3, 0.7, 0.2)  # Bright green during day
+    else:  # Bright Evening
+        grass_col = (0.25, 0.6, 0.18)  # Brighter green for evening
+
+    glColor3f(*grass_col)
+
+    # Draw multiple grass blades in a small area
+    for i in range(3):
+        glPushMatrix()
+        # Random offset for each blade
+        offset_x = (random.random() - 0.5) * grass_width
+        offset_z = (random.random() - 0.5) * grass_width
+        glTranslatef(offset_x, 0, offset_z)
+
+        # Draw pointed grass blade as a triangle
+        glBegin(GL_TRIANGLES)
+        glVertex3f(0, 0, 0)  # Base
+        glVertex3f(-grass_width/3, grass_height, 0)  # Left point
+        glVertex3f(grass_width/3, grass_height, 0)   # Right point
+        glEnd()
+
+        glPopMatrix()
+
+    glPopMatrix()
+
+def draw_scenery():
+    global building_heights
+    z_start = max(scene_start, car_z - view_dist)
+    z_end = min(scene_end, car_z + view_dist)
+
+    # -----------------------
+    # LEFT SIDE BUILDINGS
+    # -----------------------
+    current_z = (int(z_start // building_spacing) * building_spacing)
+    while current_z < z_end:
+        # Use a unique key for left side buildings by adding "left" prefix
+        key = f"left_{current_z}"
+        if key not in building_heights:
+            building_heights[key] = random.uniform(8, 15)
+        height1 = building_heights[key]
+
+        # Second building with its own unique key
+        key2 = f"left2_{current_z}"
+        if key2 not in building_heights:
+            building_heights[key2] = random.uniform(6, 12)
+        height2 = building_heights[key2]
+
+        # Multiple buildings left of the road
+        draw_building(-road_width/2 - 6, current_z, 4, height1, 3, (0.7, 0.7, 0.8))
+        draw_building(-road_width/2 - 12, current_z, 3.5, height2, 3, (0.6, 0.8, 0.7))
+
+        current_z += building_spacing
+
+    # -----------------------
+    # RIGHT SIDE BUILDINGS
+    # -----------------------
+    current_z = (int((z_start + building_spacing//2) // building_spacing) * building_spacing)
+    while current_z < z_end:
+        # Use a unique key for right side buildings by adding "right" prefix
+        key = f"right_{current_z}"
+        if key not in building_heights:
+            building_heights[key] = random.uniform(8, 15)
+        height1 = building_heights[key]
+
+        # Second building with its own unique key
+        key2 = f"right2_{current_z}"
+        if key2 not in building_heights:
+            building_heights[key2] = random.uniform(6, 12)
+        height2 = building_heights[key2]
+
+        # Multiple buildings right of the road
+        draw_building(road_width/2 + 6, current_z, 4, height1, 3, (0.7, 0.7, 0.8))
+        draw_building(road_width/2 + 12, current_z, 3.5, height2, 3, (0.8, 0.7, 0.6))
+
+        current_z += building_spacing
+
+    # -----------------------
+    # SMALL TREES BETWEEN BUILDINGS
+    # -----------------------
+    # Add small trees between buildings on both sides
+    tree_z_start = (int(z_start // building_spacing) * building_spacing) + building_spacing // 2
+    while tree_z_start < z_end:
+        # Left side small trees
+        draw_small_tree(-road_width/2 - 3, tree_z_start)
+        draw_small_tree(-road_width/2 - 9, tree_z_start)
+        draw_small_tree(-road_width/2 - 15, tree_z_start)
+
+        # Right side small trees
+        draw_small_tree(road_width/2 + 3, tree_z_start)
+        draw_small_tree(road_width/2 + 9, tree_z_start)
+        draw_small_tree(road_width/2 + 15, tree_z_start)
+
+        tree_z_start += building_spacing
+
+def draw_small_tree(x, z, tree_height=2.5):
+    """Draw a small tree between buildings"""
+    glPushMatrix()
+    glTranslatef(x, 0, z)
+
+    # Tree trunk - smaller and darker
+    if day_mode == 1:
+        trunk_color = [0.4, 0.25, 0.1]  # Darker brown for small tree
+    else:
+        trunk_color = [0.35, 0.2, 0.08]  # Even darker for evening
+
+    glColor3f(*trunk_color)
+    glPushMatrix()
+    glTranslatef(0, tree_height * 0.3, 0)
+    glRotatef(-90, 1, 0, 0)
+    glutSolidCylinder(0.08, tree_height * 0.6, 8, 4)  # Smaller trunk
+    glPopMatrix()
+
+    # Tree foliage - smaller and more compact
+    if day_mode == 1:
+        foliage_color = [0.15, 0.5, 0.1]  # Darker green for small tree
+    else:
+        foliage_color = [0.2, 0.45, 0.12]  # Brighter for evening
+
+    glColor3f(*foliage_color)
+    glPushMatrix()
+    glTranslatef(0, tree_height * 0.7, 0)
+    glutSolidSphere(tree_height * 0.3, 8, 6)  # Smaller foliage sphere
+    glPopMatrix()
+
+    glPopMatrix()
+
+# (draw_car, draw_enhanced_car_body, draw_windows, draw_wheels, draw_lights, draw_obstacle, draw_minimap, draw_speedometer_and_hud, draw_text - unchanged)
+
+# def draw_car():
+#     glPushMatrix()
+#     glTranslatef(car_x, car_height/2 + car_jump_height, car_z)
+#     glRotatef(car_angle, 0, 1, 0)
+#     draw_enhanced_car_body()
+#     draw_windows()
+#     draw_wheels()
+#     draw_lights()
+#     glPopMatrix()
+def draw_car():
+    glPushMatrix()
+    glTranslatef(car_x, car_height/2 + car_jump_height, car_z)
+    glRotatef(car_angle, 0, 1, 0)
+
+    # Draw army tank
+    draw_tank()
+
+    glPopMatrix()
+
+def draw_tank():
+    # Save attributes to avoid state leaks
+    glPushAttrib(GL_ALL_ATTRIB_BITS)
+
+    # Draw tank body
+    draw_tank_body()
+
+    # Draw tank tracks
+    draw_tank_tracks()
+
+    # Draw tank turret
+    draw_tank_turret()
+
+    # Draw main gun barrel at front
+    draw_tank_gun()
+
+    glPopAttrib()
+
+def draw_tank_body():
+    # Main tank body - military green color
+    glColor3f(0.3, 0.4, 0.2)  # Military green
+
+    # Main hull - INCREASED LENGTH
+    glPushMatrix()
+    glScalef(2.2, 0.8, 2.5)  # Wide, low, LONGER tank body (increased from 1.8 to 2.5)
+    glutSolidCube(1)
+    glPopMatrix()
+
+    # Front armor plate (angled) - ADJUSTED FOR LONGER TANK
+    glColor3f(0.25, 0.35, 0.15)  # Darker green
+    glPushMatrix()
+    glTranslatef(0, 0, 0.8)  # Move to front (adjusted for longer tank)
+    glRotatef(15, 1, 0, 0)  # Angled front
+    glScalef(2.0, 0.6, 0.3)  # Angled front plate
+    glutSolidCube(1)
+    glPopMatrix()
+
+    # Side armor plates - ADJUSTED FOR LONGER TANK
+    glColor3f(0.28, 0.38, 0.18)  # Slightly different green
+    # Left side
+    glPushMatrix()
+    glTranslatef(-1.0, 0, 0)
+    glScalef(0.2, 0.6, 2.2)  # Increased length to match longer tank
+    glutSolidCube(1)
+    glPopMatrix()
+    # Right side
+    glPushMatrix()
+    glTranslatef(1.0, 0, 0)
+    glScalef(0.2, 0.6, 2.2)  # Increased length to match longer tank
+    glutSolidCube(1)
+    glPopMatrix()
+
+def draw_tank_tracks():
+    # Tank tracks - dark gray/black
+    glColor3f(0.15, 0.15, 0.15)  # Dark gray tracks
+
+    # Left track - ADJUSTED FOR LONGER TANK
+    glPushMatrix()
+    glTranslatef(-1.1, -0.3, 0)
+    glScalef(0.3, 0.4, 2.4)  # Longer track to match tank length
+    glutSolidCube(1)
+    glPopMatrix()
+
+    # Right track - ADJUSTED FOR LONGER TANK
+    glPushMatrix()
+    glTranslatef(1.1, -0.3, 0)
+    glScalef(0.3, 0.4, 2.4)  # Longer track to match tank length
+    glutSolidCube(1)
+    glPopMatrix()
+
+    # Track details - road wheels - MORE WHEELS FOR LONGER TANK
+    glColor3f(0.2, 0.2, 0.2)  # Slightly lighter for wheels
+    wheel_positions = [-1.0, -0.6, -0.2, 0.2, 0.6, 1.0]  # 6 wheels per side for longer tank
+
+    for pos in wheel_positions:
+        # Left wheels
+        glPushMatrix()
+        glTranslatef(-1.1, -0.3, pos)
+        glutSolidCylinder(0.15, 0.25, 12, 4)
+        glPopMatrix()
+
+        # Right wheels
+        glPushMatrix()
+        glTranslatef(1.1, -0.3, pos)
+        glutSolidCylinder(0.15, 0.25, 12, 4)
+        glPopMatrix()
+
+def draw_tank_turret():
+    # Tank turret - dark gray/black
+    glColor3f(0.2, 0.2, 0.2)  # Dark gray for turret
+
+    # Main turret body
+    glPushMatrix()
+    glTranslatef(0, 0.6, 0)  # Position above hull
+    glScalef(1.4, 0.6, 1.2)  # Rounded turret
+    glutSolidCube(1)
+    glPopMatrix()
+
+    # Turret top (slightly domed)
+    glColor3f(0.3, 0.4, 0.2)  # Darker green
+    glPushMatrix()
+    glTranslatef(0, 0.9, 0)
+    glScalef(1.2, 0.3, 1.0)
+    glutSolidCube(1)
+    glPopMatrix()
+
+    # Commander's hatch
+    glColor3f(0.2, 0.2, 0.2)  # Dark gray hatch
+    glPushMatrix()
+    glTranslatef(0, 1.0, 0)
+    glScalef(0.4, 0.1, 0.6)
+    glutSolidCube(1)
+    glPopMatrix()
+
+def draw_tank_gun():
+    # Main gun barrel - HORIZONTAL and PROPERLY CONNECTED to tank
+    glColor3f(0.2, 0.2, 0.2)  # Dark gray gun
+
+    # Gun mount (where barrel attaches to turret) - CONNECTED TO TURRET
+    glPushMatrix()
+    glTranslatef(0, 0.6, 0.6)  # Position at front of turret (no gap)
+    glScalef(0.4, 0.3, 0.4)  # Gun mount - slightly longer for better connection
+    glutSolidCube(1)
+    glPopMatrix()
+
+    # Main gun barrel - HORIZONTAL cylinder extending forward from mount
+    glColor3f(0.15, 0.15, 0.15)  # Darker gray barrel
+    glPushMatrix()
+    glTranslatef(0, 0.6, 0.8)  # Start from mount (no gap)
+    # NO ROTATION - cylinder is already horizontal by default
+    glutSolidCylinder(0.08, 1.8, 12, 8)  # Longer barrel (1.8 units)
+    glPopMatrix()
+
+    # Gun muzzle brake (end of barrel) - AT THE VERY FRONT
+    glColor3f(0.25, 0.25, 0.25)  # Lighter gray muzzle
+    glPushMatrix()
+    glTranslatef(0, 0.6, 2.6)  # At end of barrel (adjusted for longer barrel)
+    glScalef(0.15, 0.15, 0.1)
+    glutSolidCube(1)
+    glPopMatrix()
+
+    # Gun sight
+    glColor3f(0.3, 0.3, 0.3)  # Light gray sight
+    glPushMatrix()
+    glTranslatef(0.2, 0.7, 0.3)  # Position on turret
+    glScalef(0.1, 0.1, 0.2)
+    glutSolidCube(1)
+    glPopMatrix()
+
+def draw_enhanced_car_body():
+    # Sports car design with purple and magenta theme
+    glColor3f(0.5, 0.2, 0.8)  # Purple main body
+
+    # Main car body - sleeker design
+    glPushMatrix()
+    glScalef(car_width, car_height * 0.8, car_length * 1.2)  # Lower and longer
+    glutSolidCube(1)
+    glPopMatrix()
+
+    # Front section - more pointed (darker purple)
+    glColor3f(0.4, 0.15, 0.7)  # Darker purple for front
+    glPushMatrix()
+    glTranslatef(0, 0, car_length * 0.4)
+    glScalef(car_width * 0.7, car_height * 0.6, car_length * 0.3)
+    glutSolidCube(1)
+    glPopMatrix()
+
+    # Rear section - wider and more angular (magenta)
+    glColor3f(0.8, 0.2, 0.6)  # Magenta rear section
+    glPushMatrix()
+    glTranslatef(0, 0, -car_length * 0.4)
+    glScalef(car_width * 1.1, car_height * 0.7, car_length * 0.4)
+    glutSolidCube(1)
+    glPopMatrix()
+
+    # Front bumper (dark purple)
+    glColor3f(0.3, 0.1, 0.5)  # Dark purple bumper
+    glPushMatrix()
+    glTranslatef(0, -car_height/2 - 0.1, car_length/2 + 0.2)
+    glScalef(car_width*0.6, 0.1, 0.3)
+    glutSolidCube(1)
+    glPopMatrix()
+
+    # Rear bumper (dark magenta)
+    glColor3f(0.6, 0.1, 0.4)  # Dark magenta bumper
+    glPushMatrix()
+    glTranslatef(0, -car_height/2 - 0.1, -car_length/2 - 0.2)
+    glScalef(car_width*0.9, 0.1, 0.3)
+    glutSolidCube(1)
+    glPopMatrix()
+
+    # Side skirts (magenta)
+    glColor3f(0.7, 0.15, 0.5)  # Magenta side skirts
+    glPushMatrix()
+    glTranslatef(car_width/2 + 0.05, -car_height/2 - 0.05, 0)
+    glScalef(0.1, 0.2, car_length * 0.8)
+    glutSolidCube(1)
+    glPopMatrix()
+    glPushMatrix()
+    glTranslatef(-car_width/2 - 0.05, -car_height/2 - 0.05, 0)
+    glScalef(0.1, 0.2, car_length * 0.8)
+    glutSolidCube(1)
+    glPopMatrix()
+
+    # Add magenta accents on the hood
+    glColor3f(0.8, 0.3, 0.7)  # Bright magenta hood accent
+    glPushMatrix()
+    glTranslatef(0, car_height/4, car_length/3)
+    glScalef(car_width*0.8, 0.05, car_length*0.3)
+    glutSolidCube(1)
+    glPopMatrix()
+
+def draw_windows():
+    # Dark grey/black windows like in the image
+    glColor3f(0.2, 0.2, 0.2)  # Dark grey windows
+    glBegin(GL_QUADS)
+    # front window
+    glVertex3f(-car_width/2 * 0.8, -car_height/6, car_length/2 - 0.01)
+    glVertex3f(-car_width/2 * 0.8, car_height/3, car_length/2 - 0.01)
+    glVertex3f(car_width/2 * 0.8, car_height/3, car_length/2 - 0.01)
+    glVertex3f(car_width/2 * 0.8, -car_height/6, car_length/2 - 0.01)
+    # rear window
+    glVertex3f(-car_width/2 * 0.8, -car_height/6, -car_length/2 + 0.01)
+    glVertex3f(-car_width/2 * 0.8, car_height/3, -car_length/2 + 0.01)
+    glVertex3f(car_width/2 * 0.8, car_height/3, -car_length/2 + 0.01)
+    glVertex3f(car_width/2 * 0.8, -car_height/6, -car_length/2 + 0.01)
+    # side windows
+    glVertex3f(-car_width/2 - 0.01, -car_height/6, car_length/4)
+    glVertex3f(-car_width/2 - 0.01, car_height/3, car_length/4)
+    glVertex3f(-car_width/2 - 0.01, car_height/3, -car_length/4)
+    glVertex3f(-car_width/2 - 0.01, -car_height/6, -car_length/4)
+    glVertex3f(car_width/2 + 0.01, -car_height/6, car_length/4)
+    glVertex3f(car_width/2 + 0.01, car_height/3, car_length/4)
+    glVertex3f(car_width/2 + 0.01, car_height/3, -car_length/4)
+    glVertex3f(car_width/2 + 0.01, -car_height/6, -car_length/4)
+    glEnd()
+
+def draw_wheels():
+    global wheel_rotation_angle
+    wheel_radius = 0.4
+    wheel_width = 0.2
+    # Position wheels closer to car body to eliminate gaps
+    wheel_offset_x = car_width/2 + 0.1  # Close to car edge with small gap
+    wheel_offset_z = car_length/2 - 0.3  # Slightly inset from car edges
+
+    wheel_rotation_angle += current_speed * 1.2
+    if wheel_rotation_angle > 360: wheel_rotation_angle -= 360
+
+    positions = [
+        (wheel_offset_x, wheel_offset_z),   # Front right
+        (wheel_offset_x, -wheel_offset_z),  # Rear right
+        (-wheel_offset_x, wheel_offset_z),  # Front left
+        (-wheel_offset_x, -wheel_offset_z), # Rear left
+    ]
+    for x, z in positions:
+        glPushMatrix()
+        glTranslatef(x, -0.5 + wheel_radius, z)
+        glRotatef(90, 0, 1, 0)
+        glRotatef(wheel_rotation_angle, 0, 0, 1)
+
+        # Black tire
+        glColor3f(0.1, 0.1, 0.1)
+        try:
+            glutSolidCylinder(wheel_radius, wheel_width, 12, 6)
+        except Exception:
+            glutSolidTorus(0.1, wheel_radius, 8, 16)
+
+        # White spokes/hubcap
+        glColor3f(0.9, 0.9, 0.9)
+        glutSolidTorus(0.05, wheel_radius - 0.1, 6, 12)
+
+        # Small green center detail like in the image
+        glColor3f(0.2, 0.8, 0.2)
+        glutSolidSphere(0.05, 6, 6)
+
+        glPopMatrix()
+
+def draw_lights():
+    light_size = 0.15  # Larger headlights
+    light_height = -0.15  # Slightly higher position
+
+    # Enhanced headlight housings (black)
+    glColor3f(0.05, 0.05, 0.05)  # Very dark black housing
+    glPushMatrix()
+    glTranslatef(-car_width/2 * 0.85, light_height, car_length/2 * 0.9)
+    glScalef(0.3, 0.2, 0.2)
+    glutSolidCube(1)
+    glPopMatrix()
+    glPushMatrix()
+    glTranslatef(car_width/2 * 0.85, light_height, car_length/2 * 0.9)
+    glScalef(0.3, 0.2, 0.2)
+    glutSolidCube(1)
+    glPopMatrix()
+
+    # Headlight beams (when on)
+    if headlights_on:
+        glPushMatrix()
+        glTranslatef(0, light_height, car_length/2 * 0.92)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE)
+        glColor4f(1.0, 0.95, 0.7, 0.3)  # Brighter yellow beam
+        glBegin(GL_TRIANGLE_FAN)
+        glVertex3f(0, 0, 0)
+        glVertex3f(-2.0, 0, 10.0)  # Wider and longer beam
+        glVertex3f(2.0, 0, 10.0)
+        glEnd()
+        glDisable(GL_BLEND)
+        glPopMatrix()
+
+    # Headlight bulbs (brighter when on)
+    if headlights_on:
+        glColor3f(1.0, 0.95, 0.7)  # Bright yellow when on
+    else:
+        glColor3f(0.4, 0.4, 0.3)  # Dim gray when off
+
+    glPushMatrix()
+    glTranslatef(-car_width/2 * 0.85, light_height, car_length/2 * 0.9)
+    glutSolidSphere(light_size, 12, 12)
+    glPopMatrix()
+    glPushMatrix()
+    glTranslatef(car_width/2 * 0.85, light_height, car_length/2 * 0.9)
+    glutSolidSphere(light_size, 12, 12)
+    glPopMatrix()
+
+    # Add headlight rings for detail
+    glColor3f(0.2, 0.2, 0.2)  # Dark gray rings
+    glPushMatrix()
+    glTranslatef(-car_width/2 * 0.85, light_height, car_length/2 * 0.9)
+    glutSolidTorus(0.02, light_size + 0.05, 8, 16)
+    glPopMatrix()
+    glPushMatrix()
+    glTranslatef(car_width/2 * 0.85, light_height, car_length/2 * 0.9)
+    glutSolidTorus(0.02, light_size + 0.05, 8, 16)
+    glPopMatrix()
+    # Red backlights - always on
+    glColor3f(1.0, 0.1, 0.1)  # Bright red backlights
+
+    # Main backlights (spheres)
+    glPushMatrix()
+    glTranslatef(-car_width/2 * 0.8, light_height, -car_length/2 * 0.9)
+    glutSolidSphere(0.15, 8, 8)
+    glPopMatrix()
+    glPushMatrix()
+    glTranslatef(car_width/2 * 0.8, light_height, -car_length/2 * 0.9)
+    glutSolidSphere(0.15, 8, 8)
+    glPopMatrix()
+
+    # Two small rectangle-shaped backlights
+    glColor3f(1.0, 0.0, 0.0)  # Bright red rectangles
+    glPushMatrix()
+    glTranslatef(-car_width/2 * 0.3, light_height + 0.05, -car_length/2 * 0.9)
+    glScalef(0.15, 0.08, 0.02)  # Small rectangle shape
+    glutSolidCube(1)
+    glPopMatrix()
+    glPushMatrix()
+    glTranslatef(car_width/2 * 0.3, light_height + 0.05, -car_length/2 * 0.9)
+    glScalef(0.15, 0.08, 0.02)  # Small rectangle shape
+    glutSolidCube(1)
+    glPopMatrix()
+
+    # Brake lights (brighter when braking)
+    if keys[b' '] or keys[b's']:
+        glColor3f(1.0, 0.0, 0.0)  # Very bright red when braking
+        # Add light glow effect
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE)
+        glColor4f(1.0, 0.0, 0.0, 0.3)
+        glPushMatrix()
+        glTranslatef(0, light_height, -car_length/2 * 0.9)
+        glBegin(GL_TRIANGLE_FAN)
+        glVertex3f(0, 0, 0)
+        glVertex3f(-2.0, 0, -3.0)
+        glVertex3f(2.0, 0, -3.0)
+        glEnd()
+        glDisable(GL_BLEND)
+
+def draw_obstacle(o):
+    glPushMatrix()
+    glTranslatef(o.x, 0.4 + 0.2, o.z)  # All obstacles are powerups now
+    glColor3f(*o.color)
+    # All obstacles are now blue powerups
+    # spin sphere to signal power-up
+    glRotatef((time.time()*60)%360, 0, 1, 0)
+    glutSolidSphere(o.scale, 12, 12)  # Round sphere shape
+    glPopMatrix()
+
+def draw_speedometer_and_hud():
+    speed_kmh = abs(current_speed) * 3.6
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix(); glLoadIdentity(); gluOrtho2D(0, 800, 0, 600)
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix(); glLoadIdentity()
+    glDisable(GL_DEPTH_TEST)
+
+    # Enhanced score box with gradient effect
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    glColor4f(0.05, 0.05, 0.06, 0.8)
+    glBegin(GL_QUADS); glVertex2f(10, 550); glVertex2f(220, 550); glVertex2f(220, 590); glVertex2f(10, 590); glEnd()
+    glDisable(GL_BLEND)
+
+    # Enhanced text with white colors
+    glColor3f(1.0, 1.0, 1.0)  # White text
+    draw_text(15, 570, f"Score: {score}")
+    glColor3f(1.0, 1.0, 1.0)  # White text
+    draw_text(15, 555, f"Lives: {lives}")
+    glColor3f(1.0, 1.0, 1.0)  # White text
+    draw_text(15, 540, f"Time: {int(time_of_day//60):02d}:{int(time_of_day%60):02d}")
+
+    # Enhanced speed meter with white text
+    glColor3f(1.0, 1.0, 1.0)  # White text
+    draw_text(650, 565, f"Speed: {speed_kmh:.0f} km/h")
+
+    # Enhanced boost meter with visual bar
+    glColor3f(1.0, 1.0, 1.0)  # White text
+    draw_text(650, 545, f"Boost: {boost_meter:.1f}/{boost_max}")
+    # Boost bar visualization
+    boost_percent = boost_meter / boost_max
+    glColor3f(0.2, 0.2, 0.2)
+    glBegin(GL_QUADS); glVertex2f(650, 540); glVertex2f(750, 540); glVertex2f(750, 543); glVertex2f(650, 543); glEnd()
+    glColor3f(0.0, 0.8, 1.0)
+    glBegin(GL_QUADS); glVertex2f(650, 540); glVertex2f(650 + 100 * boost_percent, 540); glVertex2f(650 + 100 * boost_percent, 543); glVertex2f(650, 543); glEnd()
+
+    # Jump status with color
+    jump_text = "JUMPING!" if is_jumping else "Press J to Jump"
+    glColor3f(1.0, 1.0, 1.0)  # White text
+    draw_text(650, 525, jump_text)
+
+    # Firing status
+    glColor3f(1.0, 1.0, 1.0)  # White text
+    draw_text(650, 505, f"Press F to Fire ({len(bullets)}/{max_bullets})")
+
+    # Enhanced mode text with white color
+    mode_text = ["Day Mode", "Bright Evening Mode"][day_mode-1]
+    glColor3f(1.0, 1.0, 1.0)  # White text
+    draw_text(650, 485, mode_text)
+
+    # Weather controls
+    glColor3f(1.0, 1.0, 1.0)  # White text
+    draw_text(650, 465, "Weather: T=Rain, Y=Fog, U=Lightning")
+
+    # Weather status indicators
+    if weather_intensity > 0:
+        glColor3f(1.0, 1.0, 1.0)  # White text
+        draw_text(650, 445, f"Rain: {weather_intensity:.1f}")
+    if fog_density > 0:
+        glColor3f(1.0, 1.0, 1.0)  # White text
+        draw_text(650, 425, f"Fog: {fog_density:.3f}")
+    if lightning_timer > 0:
+        glColor3f(1.0, 1.0, 1.0)  # White text
+        draw_text(650, 405, "LIGHTNING!")
+
+    # Enhanced controls display
+    glColor3f(1.0, 1.0, 1.0)  # White text
+    draw_text(10, 30, "Controls: W/A/S/D=Drive, Space=Brake, J=Jump, F=Fire, 1=Boost")
+    draw_text(10, 15, "G/H=View, L=Headlights, M=Day/Bright Evening, T=Rain, Y=Fog, U=Lightning")
+
+    glEnable(GL_DEPTH_TEST)
+    glPopMatrix()
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+
+def draw_text(x, y, text, font=GLUT_BITMAP_HELVETICA_12):
+    glColor3f(1.0, 1.0, 1.0)
+    glRasterPos2f(x, y)
+    for ch in text:
+        glutBitmapCharacter(font, ord(ch))
+
+def draw_centered_text(y, text, font=GLUT_BITMAP_HELVETICA_12):
+    """Draw text centered horizontally on the screen (800px wide)"""
+    # Calculate text width
+    text_width = 0
+    for ch in text:
+        text_width += glutBitmapWidth(font, ord(ch))
+
+    # Center the text
+    x = (800 - text_width) // 2
+    glRasterPos2f(x, y)
+    for ch in text:
+        glutBitmapCharacter(font, ord(ch))
+
+# -----------------------
+# Display and update loop (minor: Enable offset once)
+# -----------------------
+last_time = time.time()
+def display():
+    global time_of_day, day_mode, headlights_on
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+    glLoadIdentity()
+
+    # time progression (unchanged)
+    if game_active:
+        time_of_day += 0.5
+        if time_of_day >= 24*60: time_of_day -= 24*60
+
+    # determine mode and background color (day and bright evening only)
+    if 6*60 <= time_of_day < 18*60:
+        # Day mode (6 AM to 6 PM)
+        r,g,b = (0.5, 0.8, 1.0); day_mode = 1
+    else:
+        # Bright evening mode (6 PM to 6 AM)
+        r,g,b = (0.9, 0.7, 0.4); day_mode = 2  # Brighter evening colors
+
+    headlights_on = False  # No headlights needed with bright evening mode
+
+    # sky
+    glClearColor(r, g, b, 1.0)
+    draw_sky()
+
+    # camera (unchanged)
+    if first_person_view:
+        eye_x = car_x + 0.35 * math.sin(math.radians(car_angle))
+        eye_y = car_height * 0.75 + car_jump_height
+        eye_z = car_z + 0.35 * math.cos(math.radians(car_angle))
+        look_x = car_x + math.sin(math.radians(car_angle))*2
+        look_y = eye_y - 0.15
+        look_z = car_z + math.cos(math.radians(car_angle))*2
+        gluLookAt(eye_x, eye_y, eye_z, look_x, look_y, look_z, 0, 1, 0)
+    else:
+        # smoother third-person camera with damping
+        global cam_target
+        desired_cam_x = car_x - camera_distance * math.sin(math.radians(car_angle + camera_angle_horizontal)) * math.cos(math.radians(camera_angle_vertical))
+        desired_cam_y = car_height_offset + camera_distance * math.sin(math.radians(camera_angle_vertical))
+        desired_cam_z = car_z - camera_distance * math.cos(math.radians(car_angle + camera_angle_horizontal)) * math.cos(math.radians(camera_angle_vertical))
+        cam_target[0] += (desired_cam_x - cam_target[0]) * camera_damping
+        cam_target[1] += (desired_cam_y - cam_target[1]) * camera_damping
+        cam_target[2] += (desired_cam_z - cam_target[2]) * camera_damping
+        gluLookAt(cam_target[0], cam_target[1] + camera_shake, cam_target[2], car_x, car_height/2 + car_jump_height, car_z, 0, 1, 0)
+
+    # Enhanced lighting system
+    setup_enhanced_lighting()
+
+    # Weather effects
+    draw_weather_effects()
+
+    # ground and scenery (OPTIMIZED: Offset enabled once)
+    draw_ground()
+    glEnable(GL_POLYGON_OFFSET_FILL)
+    glPolygonOffset(1.0, 1.0)
+    draw_scenery()
+    glDisable(GL_POLYGON_OFFSET_FILL)
+
+    # car (third-person ensures car is visible)
+    if not first_person_view:
+        draw_car()
+
+    # obstacles (filter visible only? But few, so unchanged)
+    for o in obstacles:
+        if abs(o.z - car_z) < view_dist:  # NEW: Skip far obstacles
+            draw_obstacle(o)
+
+    # bullets
+    draw_bullets()
+
+    # enemies
+    draw_enemies()
+
+    # Enhanced particle effects
+    draw_particles()
+
+    # HUD
+    draw_speedometer_and_hud()
+
+    if not game_active:
+        # Game Over Screen - Freeze the game and show overlay
+        glMatrixMode(GL_PROJECTION)
+        glPushMatrix()
+        glLoadIdentity()
+        gluOrtho2D(0, 800, 0, 600)
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+
+        # Semi-transparent bright overlay
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glColor4f(0.1, 0.1, 0.2, 0.4)  # Semi-transparent dark blue (much brighter)
+        glBegin(GL_QUADS)
+        glVertex2f(0, 0)
+        glVertex2f(800, 0)
+        glVertex2f(800, 600)
+        glVertex2f(0, 600)
+        glEnd()
+        glDisable(GL_BLEND)
+
+        # Bright background box for better text visibility
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glColor4f(0.0, 0.0, 0.0, 0.6)  # Semi-transparent black box
+        glBegin(GL_QUADS)
+        glVertex2f(200, 200)  # Bottom left
+        glVertex2f(600, 200)  # Bottom right
+        glVertex2f(600, 450)  # Top right
+        glVertex2f(200, 450)  # Top left
+        glEnd()
+        glDisable(GL_BLEND)
+
+        # Game Over Text - Centered (Bright Red)
+        glColor3f(1.0, 0.2, 0.2)  # Bright red text
+        draw_centered_text(400, "GAME OVER!", GLUT_BITMAP_HELVETICA_18)
+
+        # Final Score - Centered (Bright White)
+        glColor3f(1.0, 1.0, 1.0)  # Bright white text
+        draw_centered_text(350, f"Final Score: {score}", GLUT_BITMAP_HELVETICA_18)
+
+        # Lives Lost - Centered (Bright Yellow)
+        glColor3f(1.0, 1.0, 0.0)  # Bright yellow text
+        draw_centered_text(320, "All Lives Lost!", GLUT_BITMAP_HELVETICA_18)
+
+        # Restart Instructions - Centered (Bright Green)
+        glColor3f(0.0, 1.0, 0.0)  # Bright green text
+        draw_centered_text(280, "Press 'R' to Restart", GLUT_BITMAP_HELVETICA_18)
+
+        # Additional Instructions - Centered (Bright Cyan)
+        glColor3f(0.0, 1.0, 1.0)  # Bright cyan text
+        draw_centered_text(250, "Or wait 5 seconds for auto-restart", GLUT_BITMAP_HELVETICA_12)
+
+        glPopMatrix()
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
+
+    glutSwapBuffers()
+
+# update function (minor: Increased spawn delay already done globally)
+frame_acc = 0
+def update(value):
+    global car_x, car_z, car_angle, camera_angle_horizontal, camera_angle_vertical, current_speed
+    global headlights_on, first_person_view, game_active, next_obstacle_time, score, game_over_time
+    global car_jump_height, car_jump_velocity, is_jumping, camera_shake, boost_meter, boosting, last_time
+    global last_fire_time, weather_intensity, fog_density, lightning_timer
+
+    # Check if game is over first - freeze everything if so
+    if not game_active:
+        # Check for restart key even when game is over
+        if keys[b'r']:
+            reset_game()
+            keys[b'r'] = False
+        elif time.time() > game_over_time + 5:
+            reset_game()
+        else:
+            # Only update display, no game logic
+            glutPostRedisplay()
+            glutTimerFunc(16, update, 0)
+            return
+
+    now = time.time()
+    dt = now - last_time if 'last_time' in globals() else 0.016
+    # clamp dt to avoid giant jumps
+    dt = min(dt, 0.05)
+    # update particles
+    update_particles(dt)
+
+    # update bullets
+    update_bullets(dt)
+
+    # update enemies
+    update_enemies(dt)
+
+    # check bullet-enemy collisions
+    check_bullet_enemy_collisions()
+
+    if game_active:
+        # spawn logic (varied by time) - uses global SPAWN_DELAY=2.0
+        if time.time() > next_obstacle_time:
+            # make more powerups at low speed / early game
+            if random.random() < 0.15:
+                spawn_powerup()
+            else:
+                spawn_obstacle()
+            next_obstacle_time = time.time() + random.uniform(SPAWN_DELAY, SPAWN_DELAY+2.4)
+
+        # Enemy spawning logic
+        global enemy_spawn_timer
+        enemy_spawn_timer += dt
+        if enemy_spawn_timer >= enemy_spawn_interval:
+            spawn_enemy()
+            enemy_spawn_timer = 0.0
+
+    # (rest of update unchanged - jump, view toggles, input, physics, collisions, etc.)
+    # Jump input
+    if keys[b'j'] and not is_jumping:
+        is_jumping = True
+        car_jump_velocity = jump_power
+        keys[b'j'] = False
+
+    if is_jumping:
+        car_jump_height += car_jump_velocity * 0.1
+        car_jump_velocity -= gravity * 0.18
+        if car_jump_height <= 0:
+            car_jump_height = 0
+            car_jump_velocity = 0
+            is_jumping = False
+
+    # firing input - one bullet per F press (with rate control)
+    if keys[b'f'] and (now - last_fire_time) >= fire_rate:
+        fire_bullet()
+        last_fire_time = now
+        keys[b'f'] = False  # Reset key to prevent multiple bullets from single press
+
+    # view toggles
+    if keys[b'g']:
+        first_person_view = True; keys[b'g'] = False
+    if keys[b'h']:
+        first_person_view = False; keys[b'h'] = False
+
+    # headlight toggle (only meaningful at night)
+    if keys[b'l']:
+        headlights_on = not headlights_on
+        keys[b'l'] = False
+
+    # Weather controls
+    if keys[b't']:  # Toggle rain
+        weather_intensity = 0.0 if weather_intensity > 0 else 0.7
+        keys[b't'] = False
+    if keys[b'y']:  # Toggle fog
+        fog_density = 0.0 if fog_density > 0 else 0.02
+        keys[b'y'] = False
+    if keys[b'u']:  # Lightning strike
+        lightning_timer = 0.5
+        keys[b'u'] = False
+
+    # Mode switching (Day/Evening)
+    if keys[b'm']:  # Switch between day and evening
+        day_mode = 2 if day_mode == 1 else 1
+        keys[b'm'] = False
+
+    # Restart key handling moved to game over section above
+
+    # camera control
+    if keys['left'] or keys[b'q']:
+        camera_angle_horizontal += camera_rotation_speed * dt * 25.0
+    if keys['right'] or keys[b'e']:
+        camera_angle_horizontal -= camera_rotation_speed * dt * 25.0
+    if keys['up']:
+        camera_angle_vertical += camera_vertical_speed * dt * 25.0
+    if keys['down']:
+        camera_angle_vertical -= camera_vertical_speed * dt * 25.0
+    camera_angle_vertical = max(min_vertical_angle, min(max_vertical_angle, camera_angle_vertical))
+
+    # steering: smoother lerp-based
+    steer_amount = 0.0
+    if keys[b'a']:
+        steer_amount = steering_speed * dt
+    elif keys[b'd']:
+        steer_amount = -steering_speed * dt
+    car_angle += steer_amount
+
+    # Limit tank rotation to 130 degrees (-65 to +65 degrees)
+    car_angle = max(-65.0, min(65.0, car_angle))
+
+    # Enhanced acceleration / braking with particle effects
+    if keys[b'w']:
+        current_speed = min(current_speed + acceleration * dt * 30.0, max_speed)
+        # Add exhaust particles when accelerating
+        if current_speed > 1.0:
+            add_particles(car_x - math.sin(math.radians(car_angle))*1.2, 0.2 + car_jump_height, car_z - math.cos(math.radians(car_angle))*1.2, count=4, color=(0.3,0.3,0.3))
+    if keys[b's']:
+        # S key now only applies brakes - no reverse movement
+        if current_speed > 0:
+            current_speed = max(current_speed - brake_deceleration * dt * 60.0, 0)
+            # Add brake dust particles when braking
+            if current_speed > 0.5:
+                add_particles(car_x, 0.1 + car_jump_height, car_z, count=6, color=(0.5,0.4,0.3))
+
+    # Enhanced braking (space) with brake dust particles
+    if keys[b' ']:
+        if current_speed > 0:
+            current_speed = max(current_speed - brake_deceleration * dt * 60.0, 0)
+            # Add brake dust particles
+            if current_speed > 0.5:
+                add_particles(car_x, 0.1 + car_jump_height, car_z, count=6, color=(0.5,0.4,0.3))
+        elif current_speed < 0:
+            current_speed = min(current_speed + brake_deceleration * dt * 60.0, 0)
+
+    # natural drag
+    if not (keys[b'w'] or keys[b' ']):
+        if current_speed > 0:
+            current_speed = max(current_speed - 0.3 * dt * 30.0, 0)
+        # No reverse movement, so no need to handle negative speed
+
+    # boost logic (press 1 for boost)
+    global boosting
+    if keys[b'1'] and boost_meter > 0.3:
+        boosting = True
+        keys[b'1'] = False
+    if boosting:
+        boost_meter = max(0.0, boost_meter - boost_consumption)
+        current_speed = min(current_speed + 0.6, max_speed * 1.3)
+        add_particles(car_x - math.sin(math.radians(car_angle))*1.2, 0.2 + car_jump_height, car_z - math.cos(math.radians(car_angle))*1.2, count=8, color=(0.2,0.6,1))
+        if boost_meter <= 0: boosting = False
+    else:
+        boost_meter = min(boost_max, boost_meter + 0.01)
+
+    # move car
+    dx = current_speed * math.sin(math.radians(car_angle))
+    dz = current_speed * math.cos(math.radians(car_angle))
+    new_car_x = car_x + dx * 0.1
+    new_car_z = car_z + dz * 0.1
+    # clamp within road
+    tank_width = 2.2  # Tank width (unchanged)
+    car_x_clamp = road_width / 2 - tank_width / 2
+    if new_car_x < car_x_clamp and new_car_x > -car_x_clamp:
+        car_x = new_car_x
+    else:
+        car_x = max(min(new_car_x, car_x_clamp), -car_x_clamp)
+
+    car_z = new_car_z
+
+    # obstacle movement relative to world (we push obstacles toward car to simulate motion)
+    if game_active:
+        for obs in obstacles[:]:
+            obs.z -= current_speed * 0.1  # obstacles scroll backwards
+
+            if check_collision(obs) and not obs.hit:
+                obs.hit = True
+                obs.hit_time = time.time()
+                # collision effects
+                add_particles(obs.x, 0.6, obs.z, count=18, color=(1,0.4,0.1))
+                camera_shake = 0.3
+                # handle types
+                if obs.type == 'good':
+                    score += 12
+                    current_speed = min(current_speed + 1.8, max_speed * 1.05)
+                elif obs.type == 'bad':
+                    score -= 5
+                    current_speed = max(current_speed - 2.0, 0)
+                    lives -= 1
+                elif obs.type == 'power':
+                    if hasattr(obs, 'pu') and obs.pu == 'speed':
+                        boost_meter = min(boost_max, boost_meter + 2.5)
+                        score += 8
+                    else:
+                        # Blue powerups give +10 points and disappear immediately
+                        score += 10
+                        obstacles.remove(obs)  # Remove powerup immediately
+                        continue  # Skip the rest of the loop for this obstacle
+                # leave the obstacle for a short time to show hit effect
+            # remove passed obstacles
+            if obs.z < car_z - 25 and not obs.scored:
+                if not obs.hit:
+                    # rewarding avoidance
+                    if obs.type == 'good':
+                        score += 5
+                    elif obs.type == 'bad':
+                        score += 3
+                obs.scored = True
+                obstacles.remove(obs)
+
+    # camera shake decay
+    camera_shake *= 0.85
+    # update time reference
+    last_time = now
+
+    # Set next callback
+    glutPostRedisplay()
+    glutTimerFunc(16, update, 0)
+
+# collision check considers jump (unchanged)
+def check_collision(obstacle):
+    tank_radius = 1.2  # Tank collision radius
+    obs_radius = 0.9
+    # if jumping high enough, pass over
+    if is_jumping and car_jump_height > 0.8:
+        return False
+    dx = car_x - obstacle.x
+    dz = car_z - obstacle.z
+    return math.sqrt(dx*dx + dz*dz) < (tank_radius + obs_radius)
+
+# -----------------------
+# Input handlers (unchanged)
+# -----------------------
+def key_down(key, x, y):
+    if key in keys:
+        keys[key] = True
+
+def key_up(key, x, y):
+    if key in keys:
+        keys[key] = False
+
+def special_down(key, x, y):
+    if key == GLUT_KEY_UP: keys['up'] = True
+    elif key == GLUT_KEY_DOWN: keys['down'] = True
+    elif key == GLUT_KEY_LEFT: keys['left'] = True
+    elif key == GLUT_KEY_RIGHT: keys['right'] = True
+
+def special_up(key, x, y):
+    if key == GLUT_KEY_UP: keys['up'] = False
+    elif key == GLUT_KEY_DOWN: keys['down'] = False
+    elif key == GLUT_KEY_LEFT: keys['left'] = False
+    elif key == GLUT_KEY_RIGHT: keys['right'] = False
+
+# -----------------------
+# Main (unchanged)
+# -----------------------
+def main():
+    print("✨ Enhanced Beautiful Car Game (Optimized for Performance)")
+    print("Controls: W/A/S/D accelerate/steer, Space = brake, J = jump, F = fire, 1 = boost, G/H = view, L = headlights, M = day/bright evening, R = reset")
+    glutInit(sys.argv)
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
+    glutInitWindowSize(1024, 768)
+    glutInitWindowPosition(100, 100)
+    glutCreateWindow(b"Enhanced Beautiful Car Game")
+    init()
+    reset_game()
+    glutDisplayFunc(display)
+    glutKeyboardFunc(key_down)
+    glutKeyboardUpFunc(key_up)
+    glutSpecialFunc(special_down)
+    glutSpecialUpFunc(special_up)
+    glutTimerFunc(16, update, 0)
+    glutMainLoop()
+
+if __name__ == "__main__":
+    main()
