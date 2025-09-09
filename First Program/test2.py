@@ -1,4 +1,3 @@
-
 import math
 import random
 import sys
@@ -11,27 +10,28 @@ from OpenGL.GLUT import *
 # -----------------------
 # Game state (kept & extended)
 # -----------------------
-bark_texture_id = None
+bark_texture = None
 game_start_time = time.time()
 day_mode = 1  # 1=day, 2=evening
-headlights_on = False
+auto_day_night = True  # Enable automatic day/night cycling
+# headlights_on = False  # Removed - no headlights on tank
 car_x, car_z = 0.0, 0.0
 car_angle = 0.0
 current_speed = 0.0
-max_speed = 10.0  # Moderate pace - reduced from 9.0
+max_speed = 15.0
 
-acceleration = 0.08  # Very moderate acceleration
+acceleration = 0.05
 deceleration = 0.5
 brake_deceleration = 1.0
 car_width = 1.5 * 0.9
 car_length = 3.0 * 0.81
 car_height = 1.2 * 0.81
-steering_speed = 45.0  # Moderate steering speed
+steering_speed = 45.0
 wheel_rotation_angle = 0.0
 first_person_view = False
 game_active = True
 score = 0
-time_of_day = 6 * 60  # minutes; start at 6:00
+time_of_day = 6 * 60
 obstacles = []
 powerups = []
 next_obstacle_time = 0
@@ -45,12 +45,8 @@ is_jumping = False
 jump_power = 3.75
 gravity = 1.5
 
-# Enhanced Features
+
 particles = []
-weather_intensity = 0.0  # 0.0 = clear, 1.0 = heavy rain
-fog_density = 0.0
-wind_strength = 0.0
-lightning_timer = 0.0
 enhanced_lighting = True
 particle_count = 0
 
@@ -99,7 +95,7 @@ def draw_particles():
 
 def setup_enhanced_lighting():
     """Setup enhanced lighting system with multiple light sources"""
-    global enhanced_lighting
+    global enhanced_lighting, day_mode
 
     if not enhanced_lighting:
         return
@@ -120,17 +116,8 @@ def setup_enhanced_lighting():
         glLightfv(GL_LIGHT0, GL_DIFFUSE, [1.0, 0.8, 0.5, 1.0])   # Brighter warm orange
         glLightfv(GL_LIGHT0, GL_SPECULAR, [1.0, 0.8, 0.5, 1.0])
 
-    # Car headlights
-    if headlights_on:
-        glEnable(GL_LIGHT1)
-        glLightfv(GL_LIGHT1, GL_POSITION, [car_x, car_height/2 + 0.5, car_z, 1.0])  # Point light
-        glLightfv(GL_LIGHT1, GL_DIFFUSE, [1.0, 1.0, 0.8, 1.0])   # Bright white
-        glLightfv(GL_LIGHT1, GL_SPECULAR, [1.0, 1.0, 0.8, 1.0])
-        glLightf(GL_LIGHT1, GL_CONSTANT_ATTENUATION, 0.5)
-        glLightf(GL_LIGHT1, GL_LINEAR_ATTENUATION, 0.1)
-        glLightf(GL_LIGHT1, GL_QUADRATIC_ATTENUATION, 0.01)
-    else:
-        glDisable(GL_LIGHT1)
+
+    glDisable(GL_LIGHT1)
 
     # Ambient lighting
     if day_mode == 1:  # Day
@@ -138,59 +125,6 @@ def setup_enhanced_lighting():
     else:  # Bright Evening
         glLightModelfv(GL_LIGHT_MODEL_AMBIENT, [0.4, 0.35, 0.25, 1.0])  # Brighter ambient
 
-def draw_weather_effects():
-    """Draw rain, fog, and other weather effects"""
-    global weather_intensity, fog_density, wind_strength, lightning_timer
-
-    # Fog effect
-    if fog_density > 0:
-        glEnable(GL_FOG)
-        glFogi(GL_FOG_MODE, GL_EXP2)
-        glFogfv(GL_FOG_COLOR, [0.5, 0.5, 0.5, 1.0])
-        glFogf(GL_FOG_DENSITY, fog_density)
-        glHint(GL_FOG_HINT, GL_DONT_CARE)
-    else:
-        glDisable(GL_FOG)
-
-    # Rain effect
-    if weather_intensity > 0:
-        glDisable(GL_DEPTH_TEST)
-        glEnable(GL_BLEND)
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-
-        glColor4f(0.7, 0.8, 1.0, weather_intensity * 0.6)
-        glBegin(GL_LINES)
-
-        # Generate rain drops
-        for i in range(int(weather_intensity * 200)):
-            x = random.uniform(-50, 50)
-            y = random.uniform(20, 30)
-            z = random.uniform(-50, 50)
-
-            glVertex3f(x, y, z)
-            glVertex3f(x + wind_strength * 0.5, y - 2.0, z + wind_strength * 0.3)
-
-        glEnd()
-        glDisable(GL_BLEND)
-        glEnable(GL_DEPTH_TEST)
-
-    # Lightning effect
-    if lightning_timer > 0:
-        lightning_timer -= 0.016  # Assuming 60 FPS
-        if lightning_timer > 0:
-            glDisable(GL_DEPTH_TEST)
-            glColor3f(1.0, 1.0, 1.0)
-            glBegin(GL_LINES)
-            for i in range(5):
-                x = random.uniform(-30, 30)
-                y = random.uniform(15, 25)
-                z = random.uniform(-30, 30)
-                glVertex3f(x, y, z)
-                glVertex3f(x + random.uniform(-2, 2), y - 10, z + random.uniform(-2, 2))
-            glEnd()
-            glEnable(GL_DEPTH_TEST)
-
-# Camera
 camera_angle_horizontal = 0.0
 camera_angle_vertical = 18.0
 camera_distance = 9.0
@@ -220,9 +154,9 @@ tree_heights = {}
 keys = {
     b'w': False, b's': False, b'a': False, b'd': False, b' ': False, b'r': False, b'l': False,
     b'1': False, b'2': False, b'3': False, b'g': False, b'h': False, b'j': False, b'f': False,
-    b't': False, b'y': False, b'u': False,  # Weather controls
-    b'm': False,  # Mode switch (Day/Evening)
-    'left': False, 'right': False, 'up': False, 'down': False, b'q': False, b'e': False
+    # b't': False, b'y': False, b'u': False,  # Weather controls - removed
+    b'c': False,  # Mode switch (Day/Evening)
+    'left': False, 'right': False, 'up': False, 'down': False
 }
 
 # Particles
@@ -230,16 +164,22 @@ particles = []
 
 # Bullets
 bullets = []
-bullet_speed = 40.0  # Increased bullet speed
-max_bullets = 50
+bullet_speed = 120.0  # Much higher bullet speed for faster projectiles
+max_bullets = 30  # More shells for enhanced gameplay
 last_fire_time = 0.0
-fire_rate = 0.3  # Minimum time between shots (seconds) - increased for slower firing
+fire_rate = 2.0  # Slightly faster firing rate
+barrel_heat = 0.0  # Barrel heat system
+max_barrel_heat = 100.0
+barrel_cooldown_rate = 10.0  # Heat dissipation per second
+recoil_force = 0.0  # Tank recoil effect
+shell_type = 'armor_piercing'  # Only the most powerful shell
+auto_aim_enabled = True  # Enhanced aiming system
 
 # Enemies
 enemies = []
 enemy_spawn_timer = 0.0
-enemy_spawn_interval = 3.0  # Spawn enemy every 3 seconds
-max_enemies = 10
+enemy_spawn_interval = 3.0
+max_enemies = 30
 
 # Score system
 score = 0
@@ -282,17 +222,42 @@ class Particle:
         self.age = 0.0
 
 class Bullet:
-    def __init__(self, x, y, z, vx, vy, vz):
+    def __init__(self, x, y, z, vx, vy, vz, shell_type='standard'):
         self.x = x
         self.y = y
         self.z = z
         self.vx = vx
         self.vy = vy
         self.vz = vz
-        self.life = 3.0  # Bullet lifetime in seconds
+        self.shell_type = shell_type
         self.age = 0.0
-        self.radius = 0.1
-        self.color = (1.0, 1.0, 0.0)  # Yellow bullet
+        self.trail = []  # Trail points for visual effect
+
+        # Shell properties based on type
+        if shell_type == 'standard':
+            self.life = 8.0
+            self.radius = 0.15
+            self.color = (0.8, 0.6, 0.2)  # Brass
+            self.gravity = 4.9
+            self.drag = 0.995
+            self.explosion_radius = 2.0
+            self.damage = 15
+        elif shell_type == 'armor_piercing':
+            self.life = 10.0
+            self.radius = 0.12  # Even smaller size for more realistic appearance
+            self.color = (1.0, 0.0, 0.0)  # BRIGHT RED for maximum visibility
+            self.gravity = 3.0
+            self.drag = 0.998
+            self.explosion_radius = 3.0  # Increased explosion radius for better area damage
+            self.damage = 25
+        elif shell_type == 'explosive':
+            self.life = 6.0
+            self.radius = 0.18
+            self.color = (1.0, 0.4, 0.1)  # Orange
+            self.gravity = 6.0
+            self.drag = 0.99
+            self.explosion_radius = 4.0
+            self.damage = 20
 
 class Enemy:
     def __init__(self, x, z):
@@ -300,7 +265,7 @@ class Enemy:
         self.y = 0.0
         self.z = z
         self.speed = 5.0 + random.random() * 2.5  # Moderate enemy speed: 5.0-7.5
-        self.radius = 0.8
+        self.radius = 1.0
         self.health = 1
         self.color = (1.0, 0.2, 0.2)  # Red enemy
         self.pulse = 0.0  # For pulsing effect
@@ -331,7 +296,7 @@ def reset_game():
     global car_x, car_z, car_angle, current_speed, camera_angle_horizontal, camera_angle_vertical
     global headlights_on, first_person_view, game_active, score, obstacles, particles, powerups, lives
     global game_start_time, next_obstacle_time, car_jump_height, car_jump_velocity, is_jumping, boost_meter, bullets
-    global enemies, enemy_spawn_timer
+    global enemies, enemy_spawn_timer, barrel_heat, recoil_force
     game_start_time = time.time()
     obstacles = []
     powerups = []
@@ -354,6 +319,8 @@ def reset_game():
     car_jump_velocity = 0.0
     is_jumping = False
     boost_meter = boost_max / 2
+    barrel_heat = 0.0
+    recoil_force = 0.0
 
 def spawn_obstacle(z_offset=OBSTACLE_Z_AHEAD):
     z = car_z + z_offset + random.uniform(-10, 30)
@@ -403,78 +370,254 @@ def draw_particles():
 
 # Bullet helper functions
 def fire_bullet():
-    global bullets
+    global bullets, barrel_heat, recoil_force
     if len(bullets) >= max_bullets:
-        return  # Limit number of bullets
+        return  # Limit number of shells
 
-    # Calculate bullet starting position (from tank gun barrel tip at FRONT)
-    # Tank gun barrel tip is at (0, 0.6, 2.6) relative to tank center
-    # We need to transform this to world coordinates
+    # Check barrel heat - can't fire if too hot
+    if barrel_heat >= max_barrel_heat:
+        return  # Barrel too hot to fire
 
-    # Tank center position in world coordinates
+
     tank_center_x = car_x
     tank_center_y = car_height/2 + car_jump_height
     tank_center_z = car_z
 
-    # Gun barrel tip position relative to tank center (before rotation)
-    # EXACT MATCH: These coordinates must match the gun muzzle brake position exactly
+    # Gun muzzle position relative to tank center (EXACT match with draw_tank_gun)
+    # From draw_tank_gun: glTranslatef(0, 0.6, 2.6) - this is the muzzle position
     gun_local_x = 0.0
-    gun_local_y = 0.6  # Height above tank center - matches gun barrel
-    gun_local_z = 2.6  # EXACT position of gun muzzle brake - matches drawing function
+    gun_local_y = 0.6  # Height above tank center (matches draw_tank_gun)
+    gun_local_z = 2.6  # Forward from tank center (matches draw_tank_gun muzzle)
 
-    # Apply tank rotation to get world position
-    # Rotate the local gun position by the tank's angle
-    cos_angle = math.cos(math.radians(car_angle))
-    sin_angle = math.sin(math.radians(car_angle))
+    # Apply EXACT same rotation as draw_car: glRotatef(car_angle, 0, 1, 0)
+    # This is a Y-axis rotation (around vertical axis)
+    angle_rad = math.radians(car_angle)
+    cos_angle = math.cos(angle_rad)
+    sin_angle = math.sin(angle_rad)
 
-    # Transform gun barrel tip position to world coordinates
-    # This ensures bullets ALWAYS come from the exact gun barrel tip
-    # PINPOINT ACCURATE: Coordinates match exactly with gun muzzle brake position (0, 0.6, 2.6)
-    # The bullet will fire from the exact center of the muzzle brake cube
+    # Transform gun position using EXACT same math as OpenGL rotation
+    # For Y-axis rotation: x' = x*cos - z*sin, y' = y, z' = x*sin + z*cos
     gun_x = tank_center_x + gun_local_x * cos_angle - gun_local_z * sin_angle
-    gun_y = tank_center_y + gun_local_y
+    gun_y = tank_center_y + gun_local_y  # Y doesn't change in Y-axis rotation
     gun_z = tank_center_z + gun_local_x * sin_angle + gun_local_z * cos_angle
 
-    # Calculate bullet direction (forward from car) - match car movement exactly
-    bullet_vx = bullet_speed * sin_angle
-    bullet_vy = 0.0  # No vertical velocity initially
-    bullet_vz = bullet_speed * cos_angle
+    # Calculate shell direction (forward from tank) - PRECISE direction
+    # The shell should travel in the same direction the tank is facing
+    # Shell speed is much higher for faster projectiles
+    shell_speed = max(current_speed * 2.0, bullet_speed)  # Use bullet_speed as minimum
 
-    # Create new bullet
-    bullet = Bullet(gun_x, gun_y, gun_z, bullet_vx, bullet_vy, bullet_vz)
-    bullets.append(bullet)
+    # Calculate tank's current movement velocity components
+    tank_vx = current_speed * sin_angle  # Tank's X velocity
+    tank_vz = current_speed * cos_angle  # Tank's Z velocity
+
+    # Shell velocity = shell speed in tank's direction + tank's current velocity
+    # This ensures shells maintain proper trajectory even when tank is moving sideways
+    shell_vx = shell_speed * sin_angle + tank_vx * 0.3  # Add some tank momentum
+    shell_vy = 0.0  # No initial vertical velocity (horizontal firing)
+    shell_vz = shell_speed * cos_angle + tank_vz * 0.3  # Add some tank momentum
+
+    # Use the powerful armor piercing shell
+    shell_type = 'armor_piercing'
+
+    # DEBUG: Print bullet position to verify it matches visual barrel
+    print(f"DEBUG: Bullet firing from ({gun_x:.2f}, {gun_y:.2f}, {gun_z:.2f})")
+    print(f"DEBUG: Tank at ({car_x:.2f}, {car_height/2 + car_jump_height:.2f}, {car_z:.2f}) angle {car_angle:.1f}°")
+
+    # Create new shell with PRECISE position and velocity
+    shell = Bullet(gun_x, gun_y, gun_z, shell_vx, shell_vy, shell_vz, shell_type)
+    bullets.append(shell)
+
+    # Add barrel heat for armor piercing shell
+    barrel_heat += 20.0
+
+    # Add recoil force
+    recoil_force = 0.3
+
+    # Add dramatic muzzle flash effect for tank firing (at EXACT muzzle position)
+    flash_color = (0.8, 0.8, 0.9)  # Steel gray flash for armor piercing
+    add_particles(gun_x, gun_y, gun_z, count=30, spread=0.8, color=flash_color)  # More particles for visibility
+    add_particles(gun_x, gun_y, gun_z, count=20, spread=0.4, color=(1.0, 1.0, 0.8))  # Brighter flash
+    add_particles(gun_x, gun_y, gun_z, count=15, spread=0.2, color=(1.0, 0.0, 0.0))  # RED flash for barrel tip - VERY VISIBLE
+
+    # Add camera shake for tank firing
+    global camera_shake
+    shake_intensity = 0.3  # Moderate shake for armor piercing
+    camera_shake = shake_intensity
+
+def create_shell_explosion(x, y, z, shell_type='standard'):
+    """Create a dramatic shell explosion effect based on shell type"""
+    global camera_shake
+
+    if shell_type == 'standard':
+        # Standard explosion
+        add_particles(x, y, z, count=25, spread=2.0, color=(1.0, 0.6, 0.1))  # Orange fire
+        add_particles(x, y, z, count=15, spread=1.5, color=(1.0, 1.0, 0.3))  # Yellow flash
+        add_particles(x, y, z, count=10, spread=1.0, color=(0.8, 0.8, 0.8))  # Gray smoke
+        camera_shake = 0.6
+    elif shell_type == 'armor_piercing':
+        # Armor piercing - smaller but intense
+        add_particles(x, y, z, count=15, spread=1.0, color=(0.9, 0.9, 1.0))  # White flash
+        add_particles(x, y, z, count=8, spread=0.8, color=(0.6, 0.6, 0.7))   # Steel sparks
+        add_particles(x, y, z, count=5, spread=0.5, color=(0.8, 0.8, 0.8))   # Gray smoke
+        camera_shake = 0.4
+    elif shell_type == 'explosive':
+        # Explosive - massive explosion
+        add_particles(x, y, z, count=40, spread=3.0, color=(1.0, 0.4, 0.1))  # Orange fire
+        add_particles(x, y, z, count=25, spread=2.5, color=(1.0, 0.8, 0.2))  # Yellow flash
+        add_particles(x, y, z, count=20, spread=2.0, color=(0.6, 0.6, 0.6))  # Gray smoke
+        add_particles(x, y, z, count=15, spread=1.5, color=(0.8, 0.2, 0.1))  # Red sparks
+        camera_shake = 1.0
+
+    # Ground impact crater effect
+    crater_size = 1.2 if shell_type == 'standard' else 0.8 if shell_type == 'armor_piercing' else 2.0
+    add_particles(x, 0.1, z, count=12, spread=crater_size, color=(0.4, 0.3, 0.2))  # Brown dirt
 
 def update_bullets(dt):
-    global bullets
+    global bullets, enemies, score
     for bullet in bullets[:]:
-        bullet.age += dt
-        if bullet.age >= bullet.life:
+        try:
+            bullet.age += dt
+            if bullet.age >= bullet.life:
+                # Shell explodes when lifetime expires
+                explosion_x = bullet.x
+                explosion_y = bullet.y
+                explosion_z = bullet.z
+
+                create_shell_explosion(explosion_x, explosion_y, explosion_z, bullet.shell_type)
+
+                # Damage all enemies within explosion radius
+                for enemy in enemies[:]:
+                    # Calculate distance from explosion center to enemy
+                    enemy_center_y = 0.8
+                    explosion_distance = math.sqrt((explosion_x - enemy.x)**2 + (explosion_y - enemy_center_y)**2 + (explosion_z - enemy.z)**2)
+
+                    # Check if enemy is within explosion radius
+                    if explosion_distance <= bullet.explosion_radius:
+                        # Apply damage to enemy
+                        enemy.health -= bullet.damage
+
+                        # Check if enemy is dead
+                        if enemy.health <= 0:
+                            enemies.remove(enemy)
+                            score += 15  # +15 points for killing enemy
+
+                            # Add extra particles for enemy death
+                            add_particles(enemy.x, enemy_center_y, enemy.z, count=20, spread=1.5, color=(1.0, 0.8, 0.2))
+                        else:
+                            # Enemy damaged but not dead - add damage indicator
+                            add_particles(enemy.x, enemy_center_y, enemy.z, count=8, spread=0.8, color=(1.0, 0.4, 0.4))
+
+                bullets.remove(bullet)
+                continue
+
+            # Add current position to trail (keep last 10 points)
+            bullet.trail.append((bullet.x, bullet.y, bullet.z))
+            if len(bullet.trail) > 10:
+                bullet.trail.pop(0)
+
+            # Update shell position with ballistic physics
+            bullet.x += bullet.vx * dt
+            bullet.y += bullet.vy * dt
+            bullet.z += bullet.vz * dt
+
+            # Apply gravity to shell (realistic ballistic trajectory)
+            bullet.vy -= bullet.gravity * dt
+
+            # Apply air resistance/drag
+            bullet.vx *= bullet.drag
+            bullet.vy *= bullet.drag
+            bullet.vz *= bullet.drag
+
+            # Check for ground impact
+            if bullet.y <= 0.1:  # Shell hits ground
+                # Create explosion at ground impact
+                explosion_x = bullet.x
+                explosion_y = 0.1
+                explosion_z = bullet.z
+
+                create_shell_explosion(explosion_x, explosion_y, explosion_z, bullet.shell_type)
+
+                # Damage all enemies within explosion radius
+                for enemy in enemies[:]:
+                    # Calculate distance from explosion center to enemy
+                    enemy_center_y = 0.8
+                    explosion_distance = math.sqrt((explosion_x - enemy.x)**2 + (explosion_y - enemy_center_y)**2 + (explosion_z - enemy.z)**2)
+
+                    # Check if enemy is within explosion radius
+                    if explosion_distance <= bullet.explosion_radius:
+                        # Apply damage to enemy
+                        enemy.health -= bullet.damage
+
+                        # Check if enemy is dead
+                        if enemy.health <= 0:
+                            enemies.remove(enemy)
+                            score += 15  # +15 points for killing enemy
+
+                            # Add extra particles for enemy death
+                            add_particles(enemy.x, enemy_center_y, enemy.z, count=20, spread=1.5, color=(1.0, 0.8, 0.2))
+                        else:
+                            # Enemy damaged but not dead - add damage indicator
+                            add_particles(enemy.x, enemy_center_y, enemy.z, count=8, spread=0.8, color=(1.0, 0.4, 0.4))
+
+                bullets.remove(bullet)
+                continue
+
+            # Remove shells that are too far away (with safety checks) - increased range
+            if (abs(bullet.x) > 500 or bullet.y < -30 or
+                abs(bullet.z - car_z) > 600):
+                bullets.remove(bullet)
+        except (AttributeError, ValueError) as e:
+            # Remove corrupted shells
             bullets.remove(bullet)
             continue
 
-        # Update bullet position
-        bullet.x += bullet.vx * dt
-        bullet.y += bullet.vy * dt
-        bullet.z += bullet.vz * dt
-
-        # Bullets travel straight - no gravity applied
-
-        # Remove bullets that are too far away
-        if (abs(bullet.x) > 200 or bullet.y < -10 or
-            abs(bullet.z - car_z) > 300):
-            bullets.remove(bullet)
-
 def draw_bullets():
+    if not bullets:  # Skip if no shells
+        return
+
     glEnable(GL_DEPTH_TEST)
     glEnable(GL_BLEND)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
 
     for bullet in bullets:
-        glPushMatrix()
-        glTranslatef(bullet.x, bullet.y, bullet.z)
-        glColor3f(*bullet.color)
-        glutSolidSphere(bullet.radius, 8, 8)
-        glPopMatrix()
+        try:
+            # Draw shell trail first (behind the shell)
+            if len(bullet.trail) > 1:
+                glLineWidth(3.0)
+                glBegin(GL_LINE_STRIP)
+                for i, (tx, ty, tz) in enumerate(bullet.trail):
+                    # Fade trail based on age, use shell's color
+                    alpha = (i / len(bullet.trail)) * 0.6
+                    glColor4f(*bullet.color, alpha)
+                    glVertex3f(tx, ty, tz)
+                glEnd()
+                glLineWidth(1.0)
+
+            # Draw the shell itself
+            glPushMatrix()
+            glTranslatef(bullet.x, bullet.y, bullet.z)
+
+            # Shell body - use shell's actual color (armor piercing = steel gray)
+            glColor4f(*bullet.color, 0.95)
+            glutSolidSphere(bullet.radius, 12, 12)
+
+            # Shell tip - darker version of shell color
+            tip_color = (bullet.color[0] * 0.7, bullet.color[1] * 0.7, bullet.color[2] * 0.7)
+            glColor4f(*tip_color, 0.95)
+            glTranslatef(0, 0, bullet.radius * 0.3)
+            glutSolidSphere(bullet.radius * 0.4, 8, 8)
+            glTranslatef(0, 0, -bullet.radius * 0.3)
+
+            # Add a bright glow effect for visibility - ENHANCED
+            glow_color = (1.0, 1.0, 1.0)  # BRIGHT WHITE GLOW for maximum visibility
+            glColor4f(*glow_color, 0.8)  # More opaque glow
+            glutSolidSphere(bullet.radius * 2.5, 8, 8)  # Much larger glow
+
+            glPopMatrix()
+        except (AttributeError, ValueError) as e:
+            # Skip corrupted shells
+            glPopMatrix()
+            continue
 
     glDisable(GL_BLEND)
 
@@ -587,28 +730,43 @@ def draw_enemies():
         # ARMS (red cylinders) - positioned to connect with body
         arm_swing = 0.3 * math.sin(enemy.walk_cycle)
         glPushMatrix()
-        glTranslatef(-0.35, 0.7, 0)  # Positioned inside body edge for connection
+        glTranslatef(-0.4, 0.7, 0)  # Positioned at body edge for seamless connection
         glRotatef(arm_swing * 30, 1, 0, 0)  # Arm swinging
         glRotatef(90, 0, 1, 0)
         glutSolidCylinder(0.1, 0.6, 6, 6)
         glPopMatrix()
 
         glPushMatrix()
-        glTranslatef(0.35, 0.7, 0)  # Positioned inside body edge for connection
+        glTranslatef(0.4, 0.7, 0)  # Positioned at body edge for seamless connection
         glRotatef(-arm_swing * 30, 1, 0, 0)  # Opposite arm swinging
         glRotatef(90, 0, 1, 0)
         glutSolidCylinder(0.1, 0.6, 6, 6)
         glPopMatrix()
 
-        # HANDS (red spheres) - updated positions to match new arm positions
+        # LEFT HAND (from user's perspective) - make it HIGHLY visible
         glPushMatrix()
-        glTranslatef(-0.35 - 0.6 * math.cos(arm_swing * 0.5), 0.7, 0.6 * math.sin(arm_swing * 0.5))
-        glutSolidSphere(0.12, 6, 6)
+        glTranslatef(-0.4 - 0.6, 0.7, 0)  # Left hand at end of left arm (user's left)
+        glColor3f(1.0, 0.0, 0.0)  # Bright red for maximum visibility
+        glutSolidSphere(0.2, 12, 12)  # Much larger sphere for better visibility
         glPopMatrix()
+
+        # RIGHT HAND (from user's perspective) - make it HIGHLY visible
         glPushMatrix()
-        glTranslatef(0.35 + 0.6 * math.cos(arm_swing * 0.5), 0.7, 0.6 * math.sin(arm_swing * 0.5))
-        glutSolidSphere(0.12, 6, 6)
+        glTranslatef(0.4 + 0.6, 0.7, 0)  # Right hand at end of right arm (user's right)
+        glColor3f(1.0, 0.0, 0.0)  # Bright red for maximum visibility
+        glutSolidSphere(0.2, 12, 12)  # Much larger sphere for better visibility
         glPopMatrix()
+
+        # SMALL CYLINDERS on LEFT hand (from user's perspective) - connected to body
+        glPushMatrix()
+        glTranslatef(-0.4 - 0.6, 0.7, 0)  # Position at left hand (user's left)
+        glColor3f(0.9, 0.0, 0.0)  # Bright red for cylinder
+        glRotatef(90, 0, 1, 0)  # Rotate to extend horizontally
+        glutSolidCylinder(0.08, 0.5, 12, 12)  # Larger cylinder for better visibility
+        glPopMatrix()
+
+        # Restore enemy color for remaining parts
+        glColor3f(enemy.color[0] * intensity, enemy.color[1] * intensity, enemy.color[2] * intensity)
 
         # LEGS (red cylinders with walking animation)
         leg_swing = 0.4 * math.sin(enemy.walk_cycle)
@@ -640,17 +798,47 @@ def draw_enemies():
         glPopMatrix()
 
 def check_bullet_enemy_collisions():
-    global bullets, enemies, score
+    global bullets, enemies, score, camera_shake
     for bullet in bullets[:]:
         for enemy in enemies[:]:
-            # Calculate distance between bullet and enemy
-            distance = math.sqrt((bullet.x - enemy.x)**2 + (bullet.y - enemy.y)**2 + (bullet.z - enemy.z)**2)
+            # ULTRA-PRECISE COLLISION DETECTION - Works even when tank is moving
+            # Calculate distance between bullet and enemy (use enemy center height)
+            enemy_center_y = 0.8  # Enemy center height
 
-            if distance < (bullet.radius + enemy.radius + 0.3):  # More forgiving collision detection
-                # Collision detected
+            # Use 3D distance calculation for more accurate collision detection
+            dx = bullet.x - enemy.x
+            dy = bullet.y - enemy_center_y
+            dz = bullet.z - enemy.z
+            distance = math.sqrt(dx*dx + dy*dy + dz*dz)
+
+            # ULTRA-PRECISE collision threshold - very generous for moving tank scenarios
+            # Use bullet radius + enemy radius + generous tolerance for moving tank
+            collision_threshold = bullet.radius + enemy.radius + 0.8  # Increased tolerance for moving tank
+
+            # DEBUG: Print collision info when bullet is close to enemy
+            if distance < 3.0:  # Only print when bullet is reasonably close
+                print(f"DEBUG: Bullet at ({bullet.x:.2f}, {bullet.y:.2f}, {bullet.z:.2f})")
+                print(f"DEBUG: Enemy at ({enemy.x:.2f}, {enemy_center_y:.2f}, {enemy.z:.2f})")
+                print(f"DEBUG: Distance: {distance:.2f}, Threshold: {collision_threshold:.2f}")
+
+            # Primary collision detection - very generous for moving tank
+            if distance < collision_threshold:
+                # HIT DETECTED - immediate kill
+                print(f"DEBUG: HIT! Enemy killed at distance {distance:.2f}")
                 bullets.remove(bullet)
                 enemies.remove(enemy)
-                score += 10  # +10 points for killing enemy
+                score += 15  # +15 points for direct kill
+
+                # Add explosion effect for direct hit
+                create_shell_explosion(bullet.x, bullet.y, bullet.z, bullet.shell_type)
+
+                # Add dramatic death particles (more visible)
+                add_particles(enemy.x, enemy_center_y, enemy.z, count=40, spread=2.5, color=(1.0, 0.8, 0.2))  # Golden explosion
+                add_particles(enemy.x, enemy_center_y, enemy.z, count=20, spread=2.0, color=(1.0, 0.2, 0.2))  # Red blood effect
+                add_particles(enemy.x, enemy_center_y, enemy.z, count=15, spread=1.5, color=(0.8, 0.8, 0.8))  # Smoke effect
+
+                # Add camera shake for enemy kill
+                camera_shake = 0.3  # More intense shake
                 break
 
 # -----------------------
@@ -753,7 +941,8 @@ def draw_ground():
 # Persistent states for buildings (unchanged)
 building_states = {}
 def draw_building(x, z, scale_x, scale_y, scale_z, base_color):
-    """Enhanced building drawing function with improved architecture and details"""
+    """Enhanced building drawing function with improved architecture and details
+    NOTE: No gate/entrance functions - buildings are solid structures without doors"""
     global building_states
 
     key = (x, z)  # unique ID for each building
@@ -788,7 +977,7 @@ def draw_building(x, z, scale_x, scale_y, scale_z, base_color):
         # Simplified window configuration - fixed structure
         windows = []
         num_rows = 4  # Fixed number of rows for simplicity
-        num_cols = 5  # Fixed number of columns
+        num_cols = 5  # Fixed number of columns (matches window positions)
         for r in range(num_rows):
             row_states = []
             for c in range(num_cols):
@@ -818,7 +1007,7 @@ def draw_building(x, z, scale_x, scale_y, scale_z, base_color):
         col = (0.7, 0.7, 0.7)  # Default gray color
 
     glPushMatrix()
-    glTranslatef(x, scale_y / 2 + 0.1, z + 0.1)
+    glTranslatef(x, 0, z)  # Position building with bottom at ground level (Y=0)
 
     # Save/restore all attributes
     glPushAttrib(GL_ALL_ATTRIB_BITS)
@@ -842,7 +1031,7 @@ def draw_building(x, z, scale_x, scale_y, scale_z, base_color):
 
     # Draw each floor as a distinct building section
     for floor in range(num_floors):
-        floor_y = -total_building_height/2 + (floor * floor_height) + floor_height/2
+        floor_y = (floor * floor_height) + floor_height/2  # Position floors from bottom up
 
         # Each floor has slightly different color to distinguish them
         floor_col = (
@@ -897,7 +1086,7 @@ def draw_building(x, z, scale_x, scale_y, scale_z, base_color):
     glBegin(GL_LINES)
     for i in range(-int(scale_y/2), int(scale_y/2) + 1):
         y_pos = i * 0.2
-        if abs(y_pos) < scale_y/2 - 0.1:  # Don't draw lines at edges
+        if abs(y_pos) < scale_y - 0.1:  # Don't draw lines at edges
             glVertex3f(-0.5, y_pos, 0.501)
             glVertex3f(0.5, y_pos, 0.501)
     glEnd()
@@ -907,8 +1096,8 @@ def draw_building(x, z, scale_x, scale_y, scale_z, base_color):
     for i in range(-3, 4):
         x_pos = i * 0.15
         if abs(x_pos) < 0.45:
-            glVertex3f(x_pos, -scale_y/2 + 0.1, 0.501)
-            glVertex3f(x_pos, scale_y/2 - 0.1, 0.501)
+            glVertex3f(x_pos, 0.1, 0.501)
+            glVertex3f(x_pos, scale_y - 0.1, 0.501)
     glEnd()
 
     # ----------------------------
@@ -933,10 +1122,10 @@ def draw_building(x, z, scale_x, scale_y, scale_z, base_color):
 
     # Add windows to each floor
     for floor in range(num_floors):
-        floor_y = -total_building_height/2 + (floor * floor_height) + floor_height/2
+        floor_y = (floor * floor_height) + floor_height/2  # Position floors from bottom up
 
-        # 3 windows per floor
-        window_x_positions = [-0.2, 0.0, 0.2]
+        # Windows aligned with building partitions (5 windows per floor)
+        window_x_positions = [-0.3, -0.15, 0.0, 0.15, 0.3]
 
         for window_idx, x_pos in enumerate(window_x_positions):
             y_pos = floor_y
@@ -956,7 +1145,7 @@ def draw_building(x, z, scale_x, scale_y, scale_z, base_color):
                 glColor3f(1.0, 0.8, 0.4)  # Brighter warm orange
             else:  # day
                 # During day, use different colors for each floor
-                color_idx = (floor * 3 + window_idx) % len(window_colors)
+                color_idx = (floor * 5 + window_idx) % len(window_colors)
                 glColor3f(*window_colors[color_idx])
 
             glBegin(GL_QUADS)
@@ -978,35 +1167,35 @@ def draw_building(x, z, scale_x, scale_y, scale_z, base_color):
         # Flat roof with ledge
         glColor3f(col[0] * 0.6, col[1] * 0.6, col[2] * 0.6)
         glBegin(GL_QUADS)
-        glVertex3f(-0.5, scale_y / 2, 0.51)
-        glVertex3f(0.5, scale_y / 2, 0.51)
-        glVertex3f(0.5, scale_y / 2 + 0.08, 0.51)
-        glVertex3f(-0.5, scale_y / 2 + 0.08, 0.51)
+        glVertex3f(-0.5, scale_y, 0.51)
+        glVertex3f(0.5, scale_y, 0.51)
+        glVertex3f(0.5, scale_y + 0.08, 0.51)
+        glVertex3f(-0.5, scale_y + 0.08, 0.51)
         glEnd()
 
         # Roof ledge
         glColor3f(col[0] * 0.4, col[1] * 0.4, col[2] * 0.4)
         glBegin(GL_QUADS)
-        glVertex3f(-0.52, scale_y / 2 + 0.08, 0.49)
-        glVertex3f(0.52, scale_y / 2 + 0.08, 0.49)
-        glVertex3f(0.52, scale_y / 2 + 0.08, 0.53)
-        glVertex3f(-0.52, scale_y / 2 + 0.08, 0.53)
+        glVertex3f(-0.52, scale_y + 0.08, 0.49)
+        glVertex3f(0.52, scale_y + 0.08, 0.49)
+        glVertex3f(0.52, scale_y + 0.08, 0.53)
+        glVertex3f(-0.52, scale_y + 0.08, 0.53)
         glEnd()
 
     elif roof_style == "sloped":
         # Sloped roof
         glColor3f(col[0] * 0.5, col[1] * 0.5, col[2] * 0.5)
         glBegin(GL_TRIANGLES)
-        glVertex3f(0, scale_y / 2 + 0.3, 0.51)
-        glVertex3f(-0.5, scale_y / 2, 0.51)
-        glVertex3f(0.5, scale_y / 2, 0.51)
+        glVertex3f(0, scale_y + 0.3, 0.51)
+        glVertex3f(-0.5, scale_y, 0.51)
+        glVertex3f(0.5, scale_y, 0.51)
         glEnd()
 
     elif roof_style == "domed":
         # Domed roof
         glColor3f(col[0] * 0.6, col[1] * 0.6, col[2] * 0.6)
         glPushMatrix()
-        glTranslatef(0, scale_y / 2 + 0.2, 0.51)
+        glTranslatef(0, scale_y + 0.2, 0.51)  # Position roof at top of building
         glutSolidSphere(0.3, 12, 8)
         glPopMatrix()
 
@@ -1028,91 +1217,6 @@ def draw_building(x, z, scale_x, scale_y, scale_z, base_color):
     glPopAttrib()
     glDisable(GL_CULL_FACE)
     glPopMatrix()
-
-
-# def draw_tree(x, z, trunk_height, leaf_radius):
-#     glPushMatrix()
-#     glTranslatef(x, 0, z)  # Position at base of tree
-
-#     # Save/restore attributes (NEW)
-#     glPushAttrib(GL_ALL_ATTRIB_BITS)
-#     glEnable(GL_POLYGON_OFFSET_FILL)
-#     glPolygonOffset(1.0, 1.0)
-
-#     # Random seed for consistent variation
-#     random.seed(hash((x, z)))
-
-#     # Slight height and size variation
-#     height_variation = 1.0 + (random.random() - 0.5) * 0.1
-#     trunk_height *= height_variation
-#     leaf_radius *= height_variation * 1.2
-
-#     # ------------------------------
-#     # Trunk with roots (SIMPLIFIED: Fewer root extensions)
-#     # ------------------------------
-#     if day_mode == 1:
-#         glColor3f(0.55, 0.35, 0.15)  # Light brown (day)
-#     else:
-#         glColor3f(0.45, 0.25, 0.10)  # Dark brown (night)
-
-#     # Main trunk (simplified)
-#     glPushMatrix()
-#     glTranslatef(0, trunk_height * 0.2, 0)
-#     glScalef(0.6, trunk_height * 0.6, 0.6)
-#     glutSolidCube(1)
-#     glPopMatrix()
-
-#     # Root extensions (REDUCED: 2 instead of 4)
-#     for i in range(2):
-#         glPushMatrix()
-#         angle = i * 180 * 3.14159 / 180.0
-#         glTranslatef(0.3 * math.cos(angle), 0, 0.3 * math.sin(angle))
-#         glRotatef(i * 180, 0, 1, 0)
-#         glScalef(0.4, 0.2, 0.4)
-#         glutSolidCube(1)
-#         glPopMatrix()
-
-#     # ------------------------------
-#     # Foliage with clustered leaves (REDUCED clusters)
-#     # ------------------------------
-#     glTranslatef(0, trunk_height * 0.6, 0)
-
-#     if day_mode == 1:
-#         base_color = [0.2, 0.6, 0.1]  # Vibrant green (day)
-#         leaf_colors = [
-#             [0.25, 0.65, 0.15],
-#             [0.2, 0.6, 0.1],
-#             [0.3, 0.7, 0.2]
-#         ]
-#     else:
-#         base_color = [0.15, 0.4, 0.05]  # Darker green (night)
-#         leaf_colors = [
-#             [0.18, 0.45, 0.08],
-#             [0.15, 0.4, 0.05],
-#             [0.2, 0.5, 0.1]
-#         ]
-
-#     # Main canopy base
-#     glColor3f(*base_color)
-#     glutSolidSphere(leaf_radius * 0.8, 16, 16)
-
-#     # Clustered leaf-like spheres (REDUCED: 6 instead of 12)
-#     num_clusters = 6
-#     for i in range(num_clusters):
-#         glPushMatrix()
-#         angle = i * 2 * 3.14159 / num_clusters
-#         radius_offset = leaf_radius * 0.7 + random.random() * leaf_radius * 0.3
-#         height_offset = random.random() * leaf_radius * 0.4
-#         glTranslatef(radius_offset * math.cos(angle), height_offset, radius_offset * math.sin(angle))
-#         glColor3f(*leaf_colors[random.randint(0, 2)])
-#         glutSolidSphere(leaf_radius * 0.3, 12, 12)
-#         glPopMatrix()
-
-#     glPopAttrib()
-#     glPopMatrix()
-
-
-
 
 
 def draw_tree(x, z, trunk_height, leaf_radius):
@@ -1374,15 +1478,7 @@ def draw_small_tree(x, z, tree_height=2.5):
 
 # (draw_car, draw_enhanced_car_body, draw_windows, draw_wheels, draw_lights, draw_obstacle, draw_minimap, draw_speedometer_and_hud, draw_text - unchanged)
 
-# def draw_car():
-#     glPushMatrix()
-#     glTranslatef(car_x, car_height/2 + car_jump_height, car_z)
-#     glRotatef(car_angle, 0, 1, 0)
-#     draw_enhanced_car_body()
-#     draw_windows()
-#     draw_wheels()
-#     draw_lights()
-#     glPopMatrix()
+
 def draw_car():
     glPushMatrix()
     glTranslatef(car_x, car_height/2 + car_jump_height, car_z)
@@ -1468,7 +1564,9 @@ def draw_tank_tracks():
     wheel_positions = [-1.0, -0.6, -0.2, 0.2, 0.6, 1.0]  # 6 wheels per side for longer tank
 
     for pos in wheel_positions:
-        # Left wheels
+        # Left wheelsmm
+
+
         glPushMatrix()
         glTranslatef(-1.1, -0.3, pos)
         glutSolidCylinder(0.15, 0.25, 12, 4)
@@ -1670,104 +1768,10 @@ def draw_wheels():
 
         glPopMatrix()
 
-def draw_lights():
-    light_size = 0.15  # Larger headlights
-    light_height = -0.15  # Slightly higher position
-
-    # Enhanced headlight housings (black)
-    glColor3f(0.05, 0.05, 0.05)  # Very dark black housing
-    glPushMatrix()
-    glTranslatef(-car_width/2 * 0.85, light_height, car_length/2 * 0.9)
-    glScalef(0.3, 0.2, 0.2)
-    glutSolidCube(1)
-    glPopMatrix()
-    glPushMatrix()
-    glTranslatef(car_width/2 * 0.85, light_height, car_length/2 * 0.9)
-    glScalef(0.3, 0.2, 0.2)
-    glutSolidCube(1)
-    glPopMatrix()
-
-    # Headlight beams (when on)
-    if headlights_on:
-        glPushMatrix()
-        glTranslatef(0, light_height, car_length/2 * 0.92)
-        glEnable(GL_BLEND)
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE)
-        glColor4f(1.0, 0.95, 0.7, 0.3)  # Brighter yellow beam
-        glBegin(GL_TRIANGLE_FAN)
-        glVertex3f(0, 0, 0)
-        glVertex3f(-2.0, 0, 10.0)  # Wider and longer beam
-        glVertex3f(2.0, 0, 10.0)
-        glEnd()
-        glDisable(GL_BLEND)
-        glPopMatrix()
-
-    # Headlight bulbs (brighter when on)
-    if headlights_on:
-        glColor3f(1.0, 0.95, 0.7)  # Bright yellow when on
-    else:
-        glColor3f(0.4, 0.4, 0.3)  # Dim gray when off
-
-    glPushMatrix()
-    glTranslatef(-car_width/2 * 0.85, light_height, car_length/2 * 0.9)
-    glutSolidSphere(light_size, 12, 12)
-    glPopMatrix()
-    glPushMatrix()
-    glTranslatef(car_width/2 * 0.85, light_height, car_length/2 * 0.9)
-    glutSolidSphere(light_size, 12, 12)
-    glPopMatrix()
-
-    # Add headlight rings for detail
-    glColor3f(0.2, 0.2, 0.2)  # Dark gray rings
-    glPushMatrix()
-    glTranslatef(-car_width/2 * 0.85, light_height, car_length/2 * 0.9)
-    glutSolidTorus(0.02, light_size + 0.05, 8, 16)
-    glPopMatrix()
-    glPushMatrix()
-    glTranslatef(car_width/2 * 0.85, light_height, car_length/2 * 0.9)
-    glutSolidTorus(0.02, light_size + 0.05, 8, 16)
-    glPopMatrix()
-    # Red backlights - always on
-    glColor3f(1.0, 0.1, 0.1)  # Bright red backlights
-
-    # Main backlights (spheres)
-    glPushMatrix()
-    glTranslatef(-car_width/2 * 0.8, light_height, -car_length/2 * 0.9)
-    glutSolidSphere(0.15, 8, 8)
-    glPopMatrix()
-    glPushMatrix()
-    glTranslatef(car_width/2 * 0.8, light_height, -car_length/2 * 0.9)
-    glutSolidSphere(0.15, 8, 8)
-    glPopMatrix()
-
-    # Two small rectangle-shaped backlights
-    glColor3f(1.0, 0.0, 0.0)  # Bright red rectangles
-    glPushMatrix()
-    glTranslatef(-car_width/2 * 0.3, light_height + 0.05, -car_length/2 * 0.9)
-    glScalef(0.15, 0.08, 0.02)  # Small rectangle shape
-    glutSolidCube(1)
-    glPopMatrix()
-    glPushMatrix()
-    glTranslatef(car_width/2 * 0.3, light_height + 0.05, -car_length/2 * 0.9)
-    glScalef(0.15, 0.08, 0.02)  # Small rectangle shape
-    glutSolidCube(1)
-    glPopMatrix()
-
-    # Brake lights (brighter when braking)
-    if keys[b' '] or keys[b's']:
-        glColor3f(1.0, 0.0, 0.0)  # Very bright red when braking
-        # Add light glow effect
-        glEnable(GL_BLEND)
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE)
-        glColor4f(1.0, 0.0, 0.0, 0.3)
-        glPushMatrix()
-        glTranslatef(0, light_height, -car_length/2 * 0.9)
-        glBegin(GL_TRIANGLE_FAN)
-        glVertex3f(0, 0, 0)
-        glVertex3f(-2.0, 0, -3.0)
-        glVertex3f(2.0, 0, -3.0)
-        glEnd()
-        glDisable(GL_BLEND)
+# def draw_lights():
+#     """Headlights and lights function - REMOVED (no headlights on tank)"""
+#     # All headlight and light functionality removed for tank
+#     pass
 
 def draw_obstacle(o):
     glPushMatrix()
@@ -1781,44 +1785,34 @@ def draw_obstacle(o):
 
 def draw_speedometer_and_hud():
     speed_kmh = abs(current_speed) * 3.6
-    glMatrixMode(GL_PROJECTION)
-    glPushMatrix(); glLoadIdentity(); gluOrtho2D(0, 800, 0, 600)
-    glMatrixMode(GL_MODELVIEW)
-    glPushMatrix(); glLoadIdentity()
-    glDisable(GL_DEPTH_TEST)
+    # Note: draw_text function now handles its own matrix setup
 
-    # Enhanced score box with gradient effect
-    glEnable(GL_BLEND)
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-    glColor4f(0.05, 0.05, 0.06, 0.8)
-    glBegin(GL_QUADS); glVertex2f(10, 550); glVertex2f(220, 550); glVertex2f(220, 590); glVertex2f(10, 590); glEnd()
-    glDisable(GL_BLEND)
 
     # Enhanced text with white colors
-    glColor3f(1.0, 1.0, 1.0)  # White text
+    glColor3f(1, 1, 1)  # White text
     draw_text(15, 570, f"Score: {score}")
-    glColor3f(1.0, 1.0, 1.0)  # White text
+    glColor3f(1, 1, 1)  # White text
     draw_text(15, 555, f"Lives: {lives}")
-    glColor3f(1.0, 1.0, 1.0)  # White text
+    glColor3f(1, 1, 1)  # White text
     draw_text(15, 540, f"Time: {int(time_of_day//60):02d}:{int(time_of_day%60):02d}")
 
     # Enhanced speed meter with white text
-    glColor3f(1.0, 1.0, 1.0)  # White text
+    glColor3f(1, 1, 1)  # White text
     draw_text(650, 565, f"Speed: {speed_kmh:.0f} km/h")
 
     # Enhanced boost meter with visual bar
-    glColor3f(1.0, 1.0, 1.0)  # White text
+    glColor3f(1, 1, 1)  # White text
     draw_text(650, 545, f"Boost: {boost_meter:.1f}/{boost_max}")
-    # Boost bar visualization
+    # Boost bar visualization - removed black background
     boost_percent = boost_meter / boost_max
-    glColor3f(0.2, 0.2, 0.2)
-    glBegin(GL_QUADS); glVertex2f(650, 540); glVertex2f(750, 540); glVertex2f(750, 543); glVertex2f(650, 543); glEnd()
+    # glColor3f(0.2, 0.2, 0.2)
+    # glBegin(GL_QUADS); glVertex2f(650, 540); glVertex2f(750, 540); glVertex2f(750, 543); glVertex2f(650, 543); glEnd()
     glColor3f(0.0, 0.8, 1.0)
     glBegin(GL_QUADS); glVertex2f(650, 540); glVertex2f(650 + 100 * boost_percent, 540); glVertex2f(650 + 100 * boost_percent, 543); glVertex2f(650, 543); glEnd()
 
     # Jump status with color
     jump_text = "JUMPING!" if is_jumping else "Press J to Jump"
-    glColor3f(1.0, 1.0, 1.0)  # White text
+    glColor3f(1, 1, 1)  # White text
     draw_text(650, 525, jump_text)
 
     # Firing status
@@ -1826,44 +1820,74 @@ def draw_speedometer_and_hud():
     draw_text(650, 505, f"Press F to Fire ({len(bullets)}/{max_bullets})")
 
     # Enhanced mode text with white color
-    mode_text = ["Day Mode", "Bright Evening Mode"][day_mode-1]
+    if auto_day_night:
+        mode_text = f"Auto: {['Day', 'Evening'][day_mode-1]} Mode"
+    else:
+        mode_text = f"Manual: {['Day', 'Evening'][day_mode-1]} Mode"
     glColor3f(1.0, 1.0, 1.0)  # White text
     draw_text(650, 485, mode_text)
 
-    # Weather controls
-    glColor3f(1.0, 1.0, 1.0)  # White text
-    draw_text(650, 465, "Weather: T=Rain, Y=Fog, U=Lightning")
+    # Weather controls - removed (no rain, fog, or lightning effects)
+    # glColor3f(1.0, 1.0, 1.0)  # White text
+    # draw_text(650, 465, "Weather: T=Rain, Y=Fog, U=Lightning")
 
-    # Weather status indicators
-    if weather_intensity > 0:
-        glColor3f(1.0, 1.0, 1.0)  # White text
-        draw_text(650, 445, f"Rain: {weather_intensity:.1f}")
-    if fog_density > 0:
-        glColor3f(1.0, 1.0, 1.0)  # White text
-        draw_text(650, 425, f"Fog: {fog_density:.3f}")
-    if lightning_timer > 0:
-        glColor3f(1.0, 1.0, 1.0)  # White text
-        draw_text(650, 405, "LIGHTNING!")
+    # Weather status indicators - removed
+    # if weather_intensity > 0:
+    #     glColor3f(1.0, 1.0, 1.0)  # White text
+    #     draw_text(650, 445, f"Rain: {weather_intensity:.1f}")
+    # if fog_density > 0:
+    #     glColor3f(1.0, 1.0, 1.0)  # White text
+    #     draw_text(650, 425, f"Fog: {fog_density:.3f}")
 
     # Enhanced controls display
     glColor3f(1.0, 1.0, 1.0)  # White text
     draw_text(10, 30, "Controls: W/A/S/D=Drive, Space=Brake, J=Jump, F=Fire, 1=Boost")
-    draw_text(10, 15, "G/H=View, L=Headlights, M=Day/Bright Evening, T=Rain, Y=Fog, U=Lightning")
-
-    glEnable(GL_DEPTH_TEST)
-    glPopMatrix()
-    glMatrixMode(GL_PROJECTION)
-    glPopMatrix()
-    glMatrixMode(GL_MODELVIEW)
+    draw_text(10, 15, "G/H=View, C=Auto/Manual Day/Night")
 
 def draw_text(x, y, text, font=GLUT_BITMAP_HELVETICA_12):
+    # Save current matrices
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    gluOrtho2D(0, 800, 0, 600)  # Set up 2D orthographic projection
+
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+
+    # Disable depth testing for text
+    glDisable(GL_DEPTH_TEST)
+
+    # Set text color to pure white
     glColor3f(1.0, 1.0, 1.0)
     glRasterPos2f(x, y)
     for ch in text:
         glutBitmapCharacter(font, ord(ch))
 
+    # Re-enable depth testing
+    glEnable(GL_DEPTH_TEST)
+
+    # Restore matrices
+    glPopMatrix()
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+
 def draw_centered_text(y, text, font=GLUT_BITMAP_HELVETICA_12):
     """Draw text centered horizontally on the screen (800px wide)"""
+    # Save current matrices
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    gluOrtho2D(0, 800, 0, 600)  # Set up 2D orthographic projection
+
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+
+    # Disable depth testing for text
+    glDisable(GL_DEPTH_TEST)
+
     # Calculate text width
     text_width = 0
     for ch in text:
@@ -1871,16 +1895,28 @@ def draw_centered_text(y, text, font=GLUT_BITMAP_HELVETICA_12):
 
     # Center the text
     x = (800 - text_width) // 2
+
+    # Set text color to pure white
+    glColor3f(1.0, 1.0, 1.0)
     glRasterPos2f(x, y)
     for ch in text:
         glutBitmapCharacter(font, ord(ch))
+
+    # Re-enable depth testing
+    glEnable(GL_DEPTH_TEST)
+
+    # Restore matrices
+    glPopMatrix()
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
 
 # -----------------------
 # Display and update loop (minor: Enable offset once)
 # -----------------------
 last_time = time.time()
 def display():
-    global time_of_day, day_mode, headlights_on
+    global time_of_day, day_mode, auto_day_night
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
     glLoadIdentity()
 
@@ -1890,18 +1926,25 @@ def display():
         if time_of_day >= 24*60: time_of_day -= 24*60
 
     # determine mode and background color (day and bright evening only)
-    if 6*60 <= time_of_day < 18*60:
-        # Day mode (6 AM to 6 PM)
-        r,g,b = (0.5, 0.8, 1.0); day_mode = 1
+    if auto_day_night:
+        # Automatic day/night cycling based on time
+        if 6*60 <= time_of_day < 18*60:
+            # Day mode (6 AM to 6 PM)
+            r,g,b = (0.5, 0.8, 1.0); day_mode = 1
+        else:
+            # Bright evening mode (6 PM to 6 AM)
+            r,g,b = (0.9, 0.7, 0.4); day_mode = 2  # Brighter evening colors
     else:
-        # Bright evening mode (6 PM to 6 AM)
-        r,g,b = (0.9, 0.7, 0.4); day_mode = 2  # Brighter evening colors
+        # Manual mode - use current day_mode setting
+        if day_mode == 1:
+            r,g,b = (0.5, 0.8, 1.0)  # Day colors
+        else:
+            r,g,b = (0.9, 0.7, 0.4)  # Evening colors
 
-    headlights_on = False  # No headlights needed with bright evening mode
+    # headlights_on = False  # Removed - no headlights on tank
 
-    # sky
+    # Set clear color for background
     glClearColor(r, g, b, 1.0)
-    draw_sky()
 
     # camera (unchanged)
     if first_person_view:
@@ -1923,11 +1966,14 @@ def display():
         cam_target[2] += (desired_cam_z - cam_target[2]) * camera_damping
         gluLookAt(cam_target[0], cam_target[1] + camera_shake, cam_target[2], car_x, car_height/2 + car_jump_height, car_z, 0, 1, 0)
 
+    # sky - draw after camera is set up to prevent camera rotation from affecting sky
+    draw_sky()
+
     # Enhanced lighting system
     setup_enhanced_lighting()
 
-    # Weather effects
-    draw_weather_effects()
+    # Weather effects - removed (no rain, fog, or lightning)
+    # draw_weather_effects()
 
     # ground and scenery (OPTIMIZED: Offset enabled once)
     draw_ground()
@@ -1959,6 +2005,9 @@ def display():
 
     if not game_active:
         # Game Over Screen - Freeze the game and show overlay
+        # Note: draw_centered_text function now handles its own matrix setup
+
+        # Semi-transparent bright overlay
         glMatrixMode(GL_PROJECTION)
         glPushMatrix()
         glLoadIdentity()
@@ -1967,7 +2016,6 @@ def display():
         glPushMatrix()
         glLoadIdentity()
 
-        # Semi-transparent bright overlay
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glColor4f(0.1, 0.1, 0.2, 0.4)  # Semi-transparent dark blue (much brighter)
@@ -1979,42 +2027,30 @@ def display():
         glEnd()
         glDisable(GL_BLEND)
 
-        # Bright background box for better text visibility
-        glEnable(GL_BLEND)
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-        glColor4f(0.0, 0.0, 0.0, 0.6)  # Semi-transparent black box
-        glBegin(GL_QUADS)
-        glVertex2f(200, 200)  # Bottom left
-        glVertex2f(600, 200)  # Bottom right
-        glVertex2f(600, 450)  # Top right
-        glVertex2f(200, 450)  # Top left
-        glEnd()
-        glDisable(GL_BLEND)
+        glPopMatrix()
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
 
-        # Game Over Text - Centered (Bright Red)
-        glColor3f(1.0, 0.2, 0.2)  # Bright red text
+        # Game Over Text - Centered (White)
+        glColor3f(1.0, 1.0, 1.0)  # White text
         draw_centered_text(400, "GAME OVER!", GLUT_BITMAP_HELVETICA_18)
 
         # Final Score - Centered (Bright White)
         glColor3f(1.0, 1.0, 1.0)  # Bright white text
         draw_centered_text(350, f"Final Score: {score}", GLUT_BITMAP_HELVETICA_18)
 
-        # Lives Lost - Centered (Bright Yellow)
-        glColor3f(1.0, 1.0, 0.0)  # Bright yellow text
+        # Lives Lost - Centered (White)
+        glColor3f(1.0, 1.0, 1.0)  # White text
         draw_centered_text(320, "All Lives Lost!", GLUT_BITMAP_HELVETICA_18)
 
-        # Restart Instructions - Centered (Bright Green)
-        glColor3f(0.0, 1.0, 0.0)  # Bright green text
+        # Restart Instructions - Centered (White)
+        glColor3f(1.0, 1.0, 1.0)  # White text
         draw_centered_text(280, "Press 'R' to Restart", GLUT_BITMAP_HELVETICA_18)
 
-        # Additional Instructions - Centered (Bright Cyan)
-        glColor3f(0.0, 1.0, 1.0)  # Bright cyan text
+        # Additional Instructions - Centered (White)
+        glColor3f(1.0, 1.0, 1.0)  # White text
         draw_centered_text(250, "Or wait 5 seconds for auto-restart", GLUT_BITMAP_HELVETICA_12)
-
-        glPopMatrix()
-        glMatrixMode(GL_PROJECTION)
-        glPopMatrix()
-        glMatrixMode(GL_MODELVIEW)
 
     glutSwapBuffers()
 
@@ -2022,9 +2058,10 @@ def display():
 frame_acc = 0
 def update(value):
     global car_x, car_z, car_angle, camera_angle_horizontal, camera_angle_vertical, current_speed
-    global headlights_on, first_person_view, game_active, next_obstacle_time, score, game_over_time
+    global first_person_view, game_active, next_obstacle_time, score, game_over_time
     global car_jump_height, car_jump_velocity, is_jumping, camera_shake, boost_meter, boosting, last_time
-    global last_fire_time, weather_intensity, fog_density, lightning_timer
+    global last_fire_time, day_mode, auto_day_night
+    # global weather_intensity, fog_density  # Removed - no weather effects
 
     # Check if game is over first - freeze everything if so
     if not game_active:
@@ -2100,33 +2137,33 @@ def update(value):
     if keys[b'h']:
         first_person_view = False; keys[b'h'] = False
 
-    # headlight toggle (only meaningful at night)
-    if keys[b'l']:
-        headlights_on = not headlights_on
-        keys[b'l'] = False
+    # headlight toggle - removed (no headlights on tank)
+    # if keys[b'l']:
+    #     headlights_on = not headlights_on
+    #     keys[b'l'] = False
 
-    # Weather controls
-    if keys[b't']:  # Toggle rain
-        weather_intensity = 0.0 if weather_intensity > 0 else 0.7
-        keys[b't'] = False
-    if keys[b'y']:  # Toggle fog
-        fog_density = 0.0 if fog_density > 0 else 0.02
-        keys[b'y'] = False
-    if keys[b'u']:  # Lightning strike
-        lightning_timer = 0.5
-        keys[b'u'] = False
+    # Weather controls - removed (no rain, fog, or lightning effects)
+    # if keys[b't']:  # Toggle rain
+    #     weather_intensity = 0.0 if weather_intensity > 0 else 0.7
+    #     keys[b't'] = False
+    # if keys[b'y']:  # Toggle fog
+    #     fog_density = 0.0 if fog_density > 0 else 0.02
+    #     keys[b'y'] = False
 
     # Mode switching (Day/Evening)
-    if keys[b'm']:  # Switch between day and evening
-        day_mode = 2 if day_mode == 1 else 1
-        keys[b'm'] = False
+    if keys[b'c']:  # Toggle between automatic and manual day/night
+        auto_day_night = not auto_day_night
+        if not auto_day_night:
+            # When switching to manual, toggle the current mode
+            day_mode = 2 if day_mode == 1 else 1
+        keys[b'c'] = False
 
     # Restart key handling moved to game over section above
 
     # camera control
-    if keys['left'] or keys[b'q']:
+    if keys['left']:
         camera_angle_horizontal += camera_rotation_speed * dt * 25.0
-    if keys['right'] or keys[b'e']:
+    if keys['right']:
         camera_angle_horizontal -= camera_rotation_speed * dt * 25.0
     if keys['up']:
         camera_angle_vertical += camera_vertical_speed * dt * 25.0
@@ -2245,6 +2282,12 @@ def update(value):
 
     # camera shake decay
     camera_shake *= 0.85
+
+    # Barrel heat cooldown
+    global barrel_heat, recoil_force
+    barrel_heat = max(0.0, barrel_heat - barrel_cooldown_rate * dt)
+    recoil_force *= 0.9  # Recoil decay
+
     # update time reference
     last_time = now
 
@@ -2254,7 +2297,7 @@ def update(value):
 
 # collision check considers jump (unchanged)
 def check_collision(obstacle):
-    tank_radius = 1.2  # Tank collision radius
+    tank_radius = 1.3  # Tank collision radius
     obs_radius = 0.9
     # if jumping high enough, pass over
     if is_jumping and car_jump_height > 0.8:
@@ -2286,17 +2329,28 @@ def special_up(key, x, y):
     elif key == GLUT_KEY_LEFT: keys['left'] = False
     elif key == GLUT_KEY_RIGHT: keys['right'] = False
 
+def mouse_click(button, state, x, y):
+    """Handle mouse clicks for firing bullets"""
+    global last_fire_time
+    if button == GLUT_LEFT_BUTTON and state == GLUT_DOWN:
+        # Fire bullet on left mouse click with rate control
+        # Only fire if game is active, we have bullets available, and rate limit allows
+        now = time.time()
+        if game_active and len(bullets) < max_bullets and (now - last_fire_time) >= fire_rate:
+            fire_bullet()  # Use enhanced firing system
+            last_fire_time = now
+
 # -----------------------
 # Main (unchanged)
 # -----------------------
 def main():
-    print("✨ Enhanced Beautiful Car Game (Optimized for Performance)")
-    print("Controls: W/A/S/D accelerate/steer, Space = brake, J = jump, F = fire, 1 = boost, G/H = view, L = headlights, M = day/bright evening, R = reset")
+    print("✨ Tank Raider (Optimized for Performance)")
+    print("Controls: W/A/S/D accelerate/steer, Space = brake, J = jump, Left Click = fire shell, 1 = boost, G/H = view, C = auto/manual day/night, R = reset")
     glutInit(sys.argv)
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
     glutInitWindowSize(1024, 768)
     glutInitWindowPosition(100, 100)
-    glutCreateWindow(b"Enhanced Beautiful Car Game")
+    glutCreateWindow(b"Tank Raider")
     init()
     reset_game()
     glutDisplayFunc(display)
@@ -2304,6 +2358,7 @@ def main():
     glutKeyboardUpFunc(key_up)
     glutSpecialFunc(special_down)
     glutSpecialUpFunc(special_up)
+    glutMouseFunc(mouse_click)  # Register mouse click handler
     glutTimerFunc(16, update, 0)
     glutMainLoop()
 
