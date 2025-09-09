@@ -5,9 +5,10 @@
 Your goal is to **survive, destroy enemies, collect power-ups, and score as high as possible** while navigating the environment.  
 
 ## 👥 Teammates
-- Safin Ahmed Tonmoy
-- Shams Rubaiat Shammo
-- Khandoker Md. Ragib Ahsan
+- [Safin Ahmed Tonmoy](https://github.com/safin-github)
+- [Shams Rubaiat Shammo](https://github.com/shamso-github)
+- [Khandoker Md. Ragib Ahsan](https://github.com/ragibKhandoker)
+
   
 ### The game features:
 - 🌆 A 3D environment with **buildings, trees, grass, and roads**  
