@@ -60,6 +60,11 @@ Follow these steps to set up and play **Tank Survival 3D**:
   ```bash
   git clone https://github.com/your-username/tank-survival-3d.git
   cd tank-survival-3d
+## 📸 Screenshot
+
+Here’s a preview of the game in action:
+
+![Gameplay Screenshot](images/homepage.png)
 
 ## 🛠️ Requirements
 Make sure you have the following installed:
