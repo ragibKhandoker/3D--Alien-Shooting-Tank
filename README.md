@@ -51,6 +51,15 @@ Your goal is to **survive, destroy enemies, collect power-ups, and score as high
 - 🏆 Scoring system (**+15 points per enemy destroyed, +points for power-ups**)  
 
 ---
+## ▶️ How to Run the Game
+
+Follow these steps to set up and play **Tank Survival 3D**:
+
+### 1. Download the Project
+- If you have **Git** installed:
+  ```bash
+  git clone https://github.com/your-username/tank-survival-3d.git
+  cd tank-survival-3d
 
 ## 🛠️ Requirements
 Make sure you have the following installed:
