@@ -65,7 +65,10 @@ Follow these steps to set up and play **Tank Survival 3D**:
 ![Gameplay Screenshot](game.png)
 
 This is a 3D tank shooting game made with OpenGL.
-
+## 👥 Teammates
+- Safin Ahmed Tonmoy
+- Shams Rubaiat Shammo
+- Khandoker Md. Ragib Ahsan
 ## 🛠️ Requirements
 Make sure you have the following installed:
 
