@@ -63,4 +63,3 @@ Make sure you have the following installed:
 ### Install dependencies:
 ```bash
 pip install PyOpenGL PyOpenGL_accelerate
-'''
