@@ -4,6 +4,11 @@
 **Tank Survival 3D** is an OpenGL-based 3D game where the player controls a tank driving through a procedurally generated cityscape.  
 Your goal is to **survive, destroy enemies, collect power-ups, and score as high as possible** while navigating the environment.  
 
+## 👥 Teammates
+- Safin Ahmed Tonmoy
+- Shams Rubaiat Shammo
+- Khandoker Md. Ragib Ahsan
+  
 ### The game features:
 - 🌆 A 3D environment with **buildings, trees, grass, and roads**  
 - ☀️ Dynamic **day/evening lighting**  
@@ -65,10 +70,6 @@ Follow these steps to set up and play **Tank Survival 3D**:
 ![Gameplay Screenshot](game.png)
 
 This is a 3D tank shooting game made with OpenGL.
-## 👥 Teammates
-- Safin Ahmed Tonmoy
-- Shams Rubaiat Shammo
-- Khandoker Md. Ragib Ahsan
 ## 🛠️ Requirements
 Make sure you have the following installed:
 
