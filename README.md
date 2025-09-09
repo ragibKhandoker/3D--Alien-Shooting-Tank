@@ -64,7 +64,7 @@ Follow these steps to set up and play **Tank Survival 3D**:
 
 Here’s a preview of the game in action:
 
-![Gameplay Screenshot](images/homepage.png)
+![Gameplay Screenshot](images/game.png.png)
 
 ## 🛠️ Requirements
 Make sure you have the following installed:
