@@ -60,11 +60,11 @@ Follow these steps to set up and play **Tank Survival 3D**:
   ```bash
   git clone https://github.com/your-username/tank-survival-3d.git
   cd tank-survival-3d
-## 📸 Screenshot
+# Tank Survival 3D
 
-Here’s a preview of the game in action:
+![Gameplay Screenshot](game.png)
 
-![Gameplay Screenshot](images/game.png.png)
+This is a 3D tank shooting game made with OpenGL.
 
 ## 🛠️ Requirements
 Make sure you have the following installed:
