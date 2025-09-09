@@ -5,7 +5,7 @@
 Your goal is to **survive, destroy enemies, collect power-ups, and score as high as possible** while navigating the environment.  
 
 ## 👥 Teammates
-- [Safin Ahmed Tonmoy](https://github.com/safin-github)
+- [Safin Ahmed Tonmoy](https://github.com/safinahmedtonmoy7860/Car-Game)
 - [Shams Rubaiat Shammo](https://github.com/shamso-github)
 - [Khandoker Md. Ragib Ahsan](https://github.com/ragibKhandoker)
 
