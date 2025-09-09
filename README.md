@@ -63,12 +63,4 @@ Make sure you have the following installed:
 ### Install dependencies:
 ```bash
 pip install PyOpenGL PyOpenGL_accelerate
-## ▶️ How to Run the Game
-
-Follow these steps to set up and play **Tank Survival 3D**:
-
-### 1. Clone or Download the Project
-If you have Git installed:
-```bash
-git clone https://github.com/your-username/tank-survival-3d.git
-cd tank-survival-3d
+'''
