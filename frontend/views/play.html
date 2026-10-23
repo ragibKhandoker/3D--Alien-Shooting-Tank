@@ -1,6 +1,6 @@
 <main class="page">
   <div class="banner" ng-if="vm.offline">
-    <strong>Backend is offline.</strong> Start it with <code>npm run dev</code> in the frontend folder. This page reconnects automatically.
+    <strong>Backend is offline.</strong> Run <code>npm start</code> in the frontend folder (or the project folder). This page reconnects by itself.
   </div>
   <div class="banner" ng-if="vm.health && !vm.health.database_configured">
     <strong>Database is not configured.</strong> Fill <code>DATABASE_URL</code> in backend/.env.

@@ -246,4 +246,4 @@ if __name__ == "__main__":
         handle_port_in_use(port)
     log_database_status()
     print_banner(port)
-    app.run(host="127.0.0.1", port=port, debug=True, use_reloader=False)
+    app.run(host=config.FLASK_HOST, port=port, debug=config.FLASK_DEBUG, use_reloader=False)

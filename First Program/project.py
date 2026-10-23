@@ -2142,7 +2142,7 @@ def update(value):
     global car_x, car_z, car_angle, camera_angle_horizontal, camera_angle_vertical, current_speed
     global first_person_view, game_active, next_obstacle_time, score, game_over_time
     global car_jump_height, car_jump_velocity, is_jumping, camera_shake, boost_meter, boosting, last_time
-    global last_fire_time, day_mode, auto_day_night
+    global last_fire_time, day_mode, auto_day_night, lives
     # global weather_intensity, fog_density  # Removed - no weather effects
 
     global score_reported
@@ -2355,6 +2355,10 @@ def update(value):
                     current_speed = max(current_speed - 2.0, 0)
                     lives -= 1
                     sound.play_hit()
+                    if lives <= 0:
+                        game_active = False
+                        game_over_time = time.time()
+                        sound.play_game_over()
                 elif obs.type == 'power':
                     sound.play_pickup()  # blue ball collected
                     if hasattr(obs, 'pu') and obs.pu == 'speed':

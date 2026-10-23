@@ -238,15 +238,27 @@
           Api.myStats().then(function (s) { vm.stats = s || {}; }).catch(angular.noop);
         };
 
+        // Only call the backend offline after 2 failed checks in a row (~4 s),
+        // so a slow start or a quick restart doesn't flash the banner
+        var failedChecks = 0;
+
         function refreshStatus() {
           return Api.gameStatus().then(function (s) {
-            if (vm.offline) { vm.offline = false; vm.error = ''; }
+            if (failedChecks > 0) {
+              // back online: reload whatever failed while it was down
+              failedChecks = 0;
+              vm.offline = false;
+              vm.error = '';
+              Api.health().then(function (h) { vm.health = h; }).catch(angular.noop);
+              vm.loadScores();
+            }
             vm.status = s;
             // game window just closed -> reload scores
             if (wasRunning && !s.running) { vm.loadScores(); }
             wasRunning = s.running;
           }, function (err) {
-            vm.offline = true;
+            failedChecks += 1;
+            if (failedChecks >= 2) { vm.offline = true; }
             return $q.reject(err);
           });
         }
@@ -268,8 +280,9 @@
   function errorText(err) {
     if (err && err.data && err.data.error) { return err.data.error; }
     var status = err ? err.status : -1;
-    if (status <= 0) {
-      return 'Cannot reach the server. Make sure "npm run dev" is still running, then refresh the page.';
+    // the dev server answers 404 for /api/* while Flask is down
+    if (status <= 0 || status === 404 || status === 502 || status === 504) {
+      return 'Cannot reach the server. Make sure "npm start" is still running in the frontend folder.';
     }
     if (status >= 500) {
       return 'Flask backend is not responding (HTTP ' + status + '). Check the [backend] lines in the terminal.';

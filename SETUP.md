@@ -57,15 +57,20 @@ npm install
 ### Step 5 — Run (every time)
 ```powershell
 cd frontend
-npm run dev
+npm start
 ```
+`npm start`, `npm run dev` and `npm run server` all do the same thing, from the `frontend` folder
+or the project root folder. They do **not** work from other folders (for example `backend\venv\Scripts`) —
+npm looks for `package.json` in the current folder. You don't need to activate the venv.
+
 This starts **both** servers:
 - Flask backend → http://127.0.0.1:5000
-- AngularJS frontend → **http://127.0.0.1:4200** (opens in the browser; `/api` calls are proxied to Flask)
+- AngularJS frontend → **http://127.0.0.1:4200** (`/api` calls are proxied to Flask)
 
-Stop with **Ctrl + C**.
+The browser opens by itself once the backend is ready. Stop with **Ctrl + C**.
+Running it again while it is already running is harmless ("already running; reusing it").
 
-Separate terminals instead (optional): `npm run backend` in one, `npm start` in the other.
+Only one of them (optional): `npm run backend` or `npm run frontend`.
 
 ### Step 6 — Play
 http://127.0.0.1:4200 → Register → Start game.

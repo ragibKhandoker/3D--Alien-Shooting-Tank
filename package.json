@@ -1,0 +1,13 @@
+{
+  "name": "tank-survival-3d",
+  "private": true,
+  "description": "Shortcuts so npm commands also work from the project root (they run inside frontend/)",
+  "scripts": {
+    "setup": "npm --prefix frontend install",
+    "start": "npm --prefix frontend start",
+    "dev": "npm --prefix frontend start",
+    "server": "npm --prefix frontend start",
+    "frontend": "npm --prefix frontend run frontend",
+    "backend": "npm --prefix frontend run backend"
+  }
+}
