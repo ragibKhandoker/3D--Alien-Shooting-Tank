@@ -1,0 +1,28 @@
+<main class="auth">
+  <section class="card auth-card">
+    <div class="auth-head">
+      <h1>Join the fight</h1>
+      <p class="muted">Create an account to save your scores and get on the leaderboard.</p>
+    </div>
+    <form ng-submit="vm.submit()">
+      <label for="reg-user">Username</label>
+      <input id="reg-user" ng-model="vm.form.username" pattern="[A-Za-z0-9_]{3,32}" autocomplete="username"
+             title="3-32 characters: letters, numbers or _" required autofocus>
+
+      <label for="reg-email">Email</label>
+      <input id="reg-email" type="email" ng-model="vm.form.email" autocomplete="email" required>
+
+      <label for="reg-pass">Password</label>
+      <input id="reg-pass" type="password" ng-model="vm.form.password" minlength="6" autocomplete="new-password" required>
+
+      <label for="reg-pass2">Confirm password</label>
+      <input id="reg-pass2" type="password" ng-model="vm.form.confirm" autocomplete="new-password" required>
+
+      <button type="submit" class="btn btn-primary btn-block" ng-disabled="vm.busy">
+        <span class="spinner" ng-if="vm.busy"></span>{{ vm.busy ? 'Creating account…' : 'Register' }}
+      </button>
+    </form>
+    <p class="error" ng-if="vm.error">{{ vm.error }}</p>
+    <p class="auth-switch">Already have an account? <a href="#!/login">Log in</a></p>
+  </section>
+</main>

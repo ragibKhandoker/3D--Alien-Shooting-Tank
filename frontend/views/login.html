@@ -1,0 +1,21 @@
+<main class="auth">
+  <section class="card auth-card">
+    <div class="auth-head">
+      <h1>Welcome back</h1>
+      <p class="muted">Log in to continue your fight against the invasion.</p>
+    </div>
+    <form ng-submit="vm.submit()">
+      <label for="login-user">Username or email</label>
+      <input id="login-user" ng-model="vm.form.username" autocomplete="username" required autofocus>
+
+      <label for="login-pass">Password</label>
+      <input id="login-pass" type="password" ng-model="vm.form.password" autocomplete="current-password" required>
+
+      <button type="submit" class="btn btn-primary btn-block" ng-disabled="vm.busy">
+        <span class="spinner" ng-if="vm.busy"></span>{{ vm.busy ? 'Logging in…' : 'Log in' }}
+      </button>
+    </form>
+    <p class="error" ng-if="vm.error">{{ vm.error }}</p>
+    <p class="auth-switch">New here? <a href="#!/register">Create an account</a></p>
+  </section>
+</main>

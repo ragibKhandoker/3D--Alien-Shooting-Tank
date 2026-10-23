@@ -1,0 +1,179 @@
+<main class="page">
+  <div class="banner" ng-if="vm.offline">
+    <strong>Backend is offline.</strong> Start it with <code>npm run dev</code> in the frontend folder. This page reconnects automatically.
+  </div>
+  <div class="banner" ng-if="vm.health && !vm.health.database_configured">
+    <strong>Database is not configured.</strong> Fill <code>DATABASE_URL</code> in backend/.env.
+  </div>
+
+  <!-- ================= HERO ================= -->
+  <section class="hero">
+    <div class="hero-copy">
+      <p class="eyebrow">Welcome back, {{ vm.user.username }}</p>
+      <h1>Drive. Shoot.<br><span class="grad">Survive the invasion.</span></h1>
+      <p class="lead">Roll your tank through the city, blast the alien waves and climb the global leaderboard. Every game you finish is saved to your account.</p>
+
+      <div class="stats">
+        <div class="stat">
+          <span class="stat-value">{{ vm.stats.best || 0 | number }}</span>
+          <span class="stat-label">Best score</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value">{{ vm.stats.games || 0 }}</span>
+          <span class="stat-label">Games played</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value">{{ vm.stats.average || 0 | number }}</span>
+          <span class="stat-label">Average</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value">{{ vm.stats.rank ? '#' + vm.stats.rank : '–' }}</span>
+          <span class="stat-label">Global rank<span ng-if="vm.stats.players"> of {{ vm.stats.players }}</span></span>
+        </div>
+      </div>
+
+      <!-- Not running: choose difficulty + start -->
+      <div class="launch" ng-if="!vm.status.running">
+        <p class="section-label">Choose difficulty</p>
+        <div class="levels" role="radiogroup" aria-label="Difficulty">
+          <button type="button" class="level level-{{ d.id }}" role="radio"
+                  ng-repeat="d in vm.difficulties"
+                  ng-class="{ active: vm.difficulty === d.id }"
+                  aria-checked="{{ vm.difficulty === d.id }}"
+                  ng-click="vm.setDifficulty(d.id)">
+            <span class="level-aliens" aria-hidden="true">
+              <svg ng-repeat="n in [1,2,3]" viewBox="0 0 24 24" ng-class="{ on: n <= d.threat }">
+                <path d="M12 3c-4 0-7 3-7 7v3c0 1 .5 2 1.5 2.5L6 20h3l1-3h4l1 3h3l-1.5-4.5C17.5 15 18 14 18 13v-3c0-4-3-7-6-7z" fill="currentColor"/>
+                <circle cx="9.3" cy="10" r="1.6" fill="#0b0f14"/><circle cx="14.7" cy="10" r="1.6" fill="#0b0f14"/>
+              </svg>
+            </span>
+            <span class="level-name">{{ d.label }}</span>
+            <span class="level-hint">{{ d.hint }}</span>
+          </button>
+        </div>
+
+        <button class="btn btn-primary btn-xl" ng-click="vm.start()" ng-disabled="vm.busy || vm.offline">
+          <span class="spinner" ng-if="vm.busy"></span>
+          <svg ng-if="!vm.busy" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+          {{ vm.busy ? 'Launching…' : 'Start game' }}
+          <span class="btn-tag">{{ vm.difficulty }}</span>
+        </button>
+        <p class="fine-print">The game opens in a new window on this computer.</p>
+      </div>
+
+      <!-- Running -->
+      <div class="live-card" ng-if="vm.status.running">
+        <div class="live-head">
+          <span class="live-dot"></span>
+          <span class="live-title">Game in progress</span>
+          <span class="tag tag-{{ vm.status.difficulty }}">{{ vm.status.difficulty }}</span>
+          <span class="live-timer">{{ vm.elapsed() }}</span>
+        </div>
+        <p ng-if="vm.isMine()">The game window is open on this computer. Press <kbd>P</kbd> to pause. Your score saves automatically on game over.</p>
+        <p ng-if="!vm.isMine()"><strong>{{ vm.status.player_name }}</strong> is playing right now. You can start once their game ends.</p>
+        <button class="btn btn-danger" ng-if="vm.isMine()" ng-click="vm.stop()" ng-disabled="vm.busy">Stop game</button>
+      </div>
+
+      <p class="error" ng-if="vm.error">{{ vm.error }}</p>
+    </div>
+
+    <div class="hero-art">
+      <div class="screen" ng-class="{ live: vm.status.running }">
+        <img src="assets/gameplay.jpg" alt="Tank Survival 3D gameplay: the tank on a city road shooting at red aliens">
+        <span class="screen-badge" ng-if="vm.status.running"><span class="live-dot"></span> LIVE</span>
+      </div>
+      <div class="float-card float-1">
+        <span class="float-icon">🎯</span>
+        <div><strong>+15</strong><small>per alien</small></div>
+      </div>
+      <div class="float-card float-2">
+        <span class="float-icon">❤️</span>
+        <div><strong>5 lives</strong><small>jump to dodge</small></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SCORES ================= -->
+  <section class="grid-2">
+    <div class="card">
+      <div class="card-head">
+        <h2>Leaderboard</h2>
+        <button class="icon-btn" ng-click="vm.loadScores()" title="Refresh" aria-label="Refresh leaderboard">
+          <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab" ng-class="{ active: vm.boardFilter === '' }" ng-click="vm.setBoardFilter('')">All</button>
+        <button type="button" class="tab" ng-repeat="d in vm.difficulties"
+                ng-class="{ active: vm.boardFilter === d.id }" ng-click="vm.setBoardFilter(d.id)">{{ d.label }}</button>
+      </div>
+
+      <div class="podium" ng-if="vm.scores.length">
+        <div class="podium-item place-{{ $index + 1 }}" ng-repeat="s in vm.scores | limitTo:3"
+             ng-class="{ me: s.player_name === vm.user.username }">
+          <span class="medal">{{ $index + 1 }}</span>
+          <span class="podium-avatar">{{ s.player_name.charAt(0) | uppercase }}</span>
+          <span class="podium-name">{{ s.player_name }}</span>
+          <span class="podium-score">{{ s.score | number }}</span>
+          <span class="tag tag-{{ s.difficulty }}">{{ s.difficulty }}</span>
+        </div>
+      </div>
+
+      <ol class="rank-list" ng-if="vm.scores.length > 3" start="4">
+        <li ng-repeat="s in vm.scores | limitTo:100:3" ng-class="{ me: s.player_name === vm.user.username }">
+          <span class="rank-no">{{ $index + 4 }}</span>
+          <span class="rank-name">{{ s.player_name }}</span>
+          <span class="tag tag-{{ s.difficulty }}">{{ s.difficulty }}</span>
+          <span class="rank-time">{{ s.duration_seconds }}s</span>
+          <span class="rank-score">{{ s.score | number }}</span>
+        </li>
+      </ol>
+
+      <div class="empty" ng-if="!vm.scores.length">
+        <span class="empty-icon">🏆</span>
+        <p>No scores here yet.<br>Be the first on the board!</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>My recent games</h2>
+      </div>
+      <ul class="history" ng-if="vm.myScores.length">
+        <li ng-repeat="s in vm.myScores">
+          <div class="history-top">
+            <span class="history-score">{{ s.score | number }}</span>
+            <span class="tag tag-{{ s.difficulty }}">{{ s.difficulty }}</span>
+            <span class="badge-best" ng-if="s.score === vm.stats.best && s.score > 0">Best</span>
+            <span class="history-when">{{ s.created_at | date:'d MMM, h:mm a' }}</span>
+          </div>
+          <div class="bar"><span class="bar-fill fill-{{ s.difficulty }}" ng-style="{ width: vm.barWidth(s.score) }"></span></div>
+          <small class="history-meta">Survived {{ s.duration_seconds }}s</small>
+        </li>
+      </ul>
+      <div class="empty" ng-if="!vm.myScores.length">
+        <span class="empty-icon">🚀</span>
+        <p>You haven't played yet.<br>Pick a difficulty and hit <strong>Start game</strong>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= CONTROLS ================= -->
+  <section class="card">
+    <div class="card-head">
+      <h2>How to play</h2>
+      <span class="muted small">Shoot aliens for points, jump over the ones you can't stop.</span>
+    </div>
+    <div class="controls">
+      <div class="control-group" ng-repeat="grp in vm.controlGroups">
+        <h3>{{ grp.title }}</h3>
+        <ul>
+          <li ng-repeat="c in grp.items">
+            <span class="keys"><kbd ng-repeat="k in c.keys">{{ k }}</kbd></span>
+            <span>{{ c.label }}</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</main>

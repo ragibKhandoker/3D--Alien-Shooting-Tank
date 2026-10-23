@@ -1,0 +1,39 @@
+# ---------- Secrets (NEVER commit) ----------
+# real database password + token secret; share .env.example instead
+.env
+.env.*
+!.env.example
+
+# ---------- Installed dependencies (recreate with pip / npm install) ----------
+backend/venv/
+venv/
+.venv/
+frontend/node_modules/
+node_modules/
+
+# ---------- Python build / cache ----------
+__pycache__/
+*.pyc
+*.pyo
+
+# ---------- Logs, backups, temp files ----------
+*.log
+*.bak
+*.tmp
+tempCodeRunnerFile.py
+
+# ---------- Old / practice files not used by the game ----------
+# (delete a line here if you DO want that file on GitHub)
+First Program/OpenGL.zip
+First Program/game.py
+First Program/test.py
+First Program/Hello_openGL.py
+First Program/Lets_draw_sth.py
+frontend/assets/game.png
+
+# ---------- Editor / OS ----------
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+.DS_Store
